@@ -22,6 +22,7 @@ type AnyElysia = Elysia<any, any, any, any, any, any, any>;
 type Prettify<T> = { [K in keyof T]: T[K] } & {};
 
 export type HttpRouteOptions = NonNullable<Parameters<Elysia["route"]>[3]>;
+export type HttpWsRouteOptions = NonNullable<Parameters<Elysia["ws"]>[1]>;
 
 export interface HttpRouteDetail {
   operationId?: string;
@@ -55,6 +56,13 @@ export interface ResolvedHttpRouteModule {
   filePath: string;
   id: string;
   route: HttpHandlerDefinition;
+}
+
+export interface ResolvedHttpWsRouteModule {
+  filePath: string;
+  id: string;
+  route?: HttpWsRouteDefinition;
+  app?: Elysia;
 }
 
 export interface HttpAdapterWatchOptions {
@@ -246,6 +254,21 @@ export interface HttpHandlerDefinition<
   ): Promise<unknown> | unknown;
 }
 
+export interface HttpWsRouteDefinition<
+  TBuses extends BusTypesContract = BusTypesContract,
+  TDatabase extends DatabaseAdapter = DatabaseAdapter,
+  TPath extends string | undefined = string,
+  TOptions extends HttpWsRouteOptions = HttpWsRouteOptions,
+  TPlugins extends readonly HttpPluginRef<TBuses, TDatabase>[] | undefined = readonly HttpPluginRef<
+    TBuses,
+    TDatabase
+  >[],
+> {
+  path?: TPath;
+  plugins?: TPlugins;
+  options: TOptions;
+}
+
 export interface BuildHttpApplicationOptions<
   TBuses extends BusTypesContract = BusTypesContract,
   TDatabase extends DatabaseAdapter = DatabaseAdapter,
@@ -287,6 +310,13 @@ export interface HttpAdapterDefinition<
   adapter: ApplicationAdapterFactory<HttpAdapterInstance<TBuses, TDatabase>, TBuses, TDatabase>;
   defineHandler: ReturnType<
     typeof import("./router/define-handler.ts").createHandlerFactory<
+      TBuses,
+      TDatabase,
+      TPlugins
+    >
+  >;
+  defineWs: ReturnType<
+    typeof import("./router/define-ws.ts").createWsFactory<
       TBuses,
       TDatabase,
       TPlugins

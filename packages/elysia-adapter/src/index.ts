@@ -5,12 +5,13 @@ export {
   discoverHttpPlugins,
   discoverHttpRouteModules,
   discoverHttpRoutes,
+  discoverHttpWsRouteModules,
   normalizeHttpRouteFile,
   validateHttpPlugins,
   validateHttpRoutes,
 } from "./transport/http/discovery.ts";
 export { definePlugin } from "./transport/http/plugins/index.ts";
-export { createHandlerFactory, defineHandler, defineHttpRoute } from "./transport/http/router/index.ts";
+export { createHandlerFactory, createWsFactory, defineHandler, defineHttpRoute, defineWebsocket, defineWs } from "./transport/http/router/index.ts";
 export type {
   BuildHttpApplicationOptions,
   HttpAdapterDefinition,
@@ -25,10 +26,13 @@ export type {
   HttpPluginRegistry,
   HttpRouteDetail,
   HttpRouteOptions,
+  HttpWsRouteDefinition,
+  HttpWsRouteOptions,
   HttpPluginDefinition,
   HttpPluginRef,
   RegisteredHttpPluginRef,
   ResolveHttpHandlerApp,
   ResolvedHttpPluginModule,
   ResolvedHttpRouteModule,
+  ResolvedHttpWsRouteModule,
 } from "./transport/http/types.ts";

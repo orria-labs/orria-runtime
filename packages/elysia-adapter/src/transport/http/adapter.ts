@@ -13,10 +13,12 @@ import { generateHttpPluginRegistryArtifacts } from "./codegen/generate-plugin-r
 import {
   discoverHttpPlugins,
   discoverHttpRoutes,
+  discoverHttpWsRouteModules,
   validateHttpPlugins,
   validateHttpRoutes,
 } from "./discovery.ts";
 import { createHandlerFactory } from "./router/define-handler.ts";
+import { createWsFactory } from "./router/define-ws.ts";
 import type {
   BuildHttpApplicationOptions,
   HttpAdapterInstance,
@@ -26,7 +28,9 @@ import type {
   HttpHandlerDefinition,
   HttpPluginDefinition,
   HttpPluginRef,
+  HttpWsRouteDefinition,
   ResolveHttpHandlerApp,
+  ResolvedHttpWsRouteModule,
 } from "./types.ts";
 
 const DEFAULT_ROUTES_DIR = path.join("src", "transport", "http", "router");
@@ -57,6 +61,13 @@ export async function buildHttpApplication<
         routesDir: options.routesDir,
       })
     : [];
+  const discoveredWsRoutes = options.rootDir
+    ? await discoverHttpWsRouteModules({
+        rootDir: options.rootDir,
+        pluginsDir: options.pluginsDir,
+        routesDir: options.routesDir,
+      })
+    : [];
   const pluginRegistry = createPluginRegistry(discoveredPlugins.map((entry) => entry.plugin));
   const routes = [...discoveredRoutes, ...(options.routes ?? [])] as Array<
     HttpHandlerDefinition<any, any, any, any, any, any>
@@ -74,6 +85,10 @@ export async function buildHttpApplication<
   for (const route of routes) {
     const routeApp = await buildRouteApplication(route, pluginRegistry, adapterContext);
     app = app.use(routeApp);
+  }
+
+  for (const route of discoveredWsRoutes) {
+    app = await applyWsRoute(app, route, pluginRegistry, adapterContext);
   }
 
   const extended = await options.extend?.({
@@ -183,6 +198,13 @@ export function defineHttpAdapter<
       >({
         plugins: options.plugins,
       }),
+      defineWs: createWsFactory<
+        TBuses,
+        TDatabase,
+        TPlugins
+      >({
+        plugins: options.plugins,
+      }),
     } as HttpAdapterDefinition<TBuses, TDatabase, TPlugins>;
   };
 }
@@ -272,6 +294,34 @@ async function buildRouteApplication<
   );
 
   return app;
+}
+
+async function applyWsRoute<
+  TBuses extends BusTypesContract,
+  TDatabase extends DatabaseAdapter,
+>(
+  app: Elysia,
+  routeModule: ResolvedHttpWsRouteModule,
+  pluginRegistry: Map<string, HttpPluginDefinition<any, any>>,
+  adapterContext: CreateApplicationAdapterContext<TBuses, TDatabase>,
+): Promise<Elysia> {
+  if (routeModule.app) {
+    return app.use(routeModule.app);
+  }
+
+  const route = routeModule.route;
+  if (!route?.path) {
+    throw new Error(`WebSocket route module "${routeModule.filePath}" must define a path`);
+  }
+
+  let wsApp: Elysia = new Elysia().decorate("ctx", adapterContext.ctx) as unknown as Elysia;
+
+  for (const pluginRef of route.plugins ?? []) {
+    wsApp = await applyPluginRef(wsApp, pluginRef, pluginRegistry, adapterContext);
+  }
+
+  wsApp = wsApp.ws(route.path, route.options as never);
+  return app.use(wsApp);
 }
 
 async function applyPluginRef<

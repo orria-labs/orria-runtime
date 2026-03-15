@@ -9,7 +9,9 @@ HTTP transport adapter для `@orria-labs/runtime` поверх `elysia`.
 - `createHttpAdapter({ rootDir })` для file-based discovery routes/plugins
 - `defineHttpAdapter<...>()({...})` как preferred API для общего экспорта `adapter` + typed `defineHandler`
 - `discoverHttpRoutes()` / `discoverHttpPlugins()` для явного discovery
+- `discoverHttpWsRouteModules()` для WebSocket discovery
 - `defineHandler()` для route handlers
+- `defineWs()` для file-based WebSocket routes
 - `createHandlerFactory()` как low-level helper для кастомных abstractions поверх handler factory
 - `definePlugin()` для Elysia plugins с доступом к `ctx`
 - global/per-route plugin refs
@@ -53,6 +55,16 @@ export default defineHandler({
 ```
 
 ```ts
+export default defineWs()({
+  options: {
+    message(ws, message) {
+      ws.send(message);
+    },
+  },
+});
+```
+
+```ts
 export const { adapter: httpAdapter, defineHandler } =
   defineHttpAdapter<GeneratedBusTypes, ExampleDatabaseAdapter>()({
     rootDir: import.meta.dir,
@@ -78,3 +90,11 @@ src/transport/http/
 ├── plugins/
 └── router/
 ```
+
+## File-based naming
+
+- `users.get.ts` → `GET /users`
+- `users/post.ts` → `POST /users`
+- `index.get.ts` → `GET /`
+- `chat.ws.ts` → `WS /chat`
+- `ws.ts` → `WS /ws`

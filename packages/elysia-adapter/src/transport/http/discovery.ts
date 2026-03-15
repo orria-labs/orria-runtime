@@ -1,16 +1,20 @@
+import { Elysia } from "elysia";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { importFreshModule, isOrriaTempModulePath } from "@orria-labs/runtime";
 
 import { isHttpPluginDefinition } from "./plugins/shared.ts";
 import { isHttpHandlerDefinition } from "./router/shared.ts";
+import { isHttpWsRouteDefinition } from "./router/ws-shared.ts";
 import type {
   DiscoverHttpTransportOptions,
   HttpHandlerDefinition,
   HttpMethod,
   HttpPluginDefinition,
+  HttpWsRouteDefinition,
   ResolvedHttpPluginModule,
   ResolvedHttpRouteModule,
+  ResolvedHttpWsRouteModule,
 } from "./types.ts";
 
 const DEFAULT_ROUTES_DIR = path.join("src", "transport", "http", "router");
@@ -44,13 +48,47 @@ export async function discoverHttpRouteModules(
   const modules: ResolvedHttpRouteModule[] = [];
 
   for (const filePath of filePaths) {
+    const discovered = normalizeHttpTransportFile(routesRootDir, filePath);
+    if (discovered.kind !== "http") {
+      continue;
+    }
+
     const routeModule = await importFreshModule<Record<string, unknown>>(filePath);
-    const route = extractRoute(routeModule, filePath, routesRootDir);
+    const route = extractRoute(routeModule, filePath, discovered);
 
     modules.push({
       filePath,
       id: `${route.method} ${route.path}`,
       route,
+    });
+  }
+
+  return modules;
+}
+
+export async function discoverHttpWsRouteModules(
+  options: DiscoverHttpTransportOptions,
+): Promise<ResolvedHttpWsRouteModule[]> {
+  const routesRootDir = path.resolve(
+    options.rootDir,
+    options.routesDir ?? DEFAULT_ROUTES_DIR,
+  );
+  const filePaths = await collectFiles(routesRootDir);
+  const modules: ResolvedHttpWsRouteModule[] = [];
+
+  for (const filePath of filePaths) {
+    const discovered = normalizeHttpTransportFile(routesRootDir, filePath);
+    if (discovered.kind !== "ws") {
+      continue;
+    }
+
+    const routeModule = await importFreshModule<Record<string, unknown>>(filePath);
+    const resolved = extractWsRoute(routeModule, filePath, discovered.path);
+
+    modules.push({
+      filePath,
+      id: resolved.route?.path ? `WS ${resolved.route.path}` : `WS ${filePath}`,
+      ...resolved,
     });
   }
 
@@ -127,6 +165,25 @@ export function normalizeHttpRouteFile(
   routesRootDir: string,
   filePath: string,
 ): { method: HttpMethod; path: string } {
+  const discovered = normalizeHttpTransportFile(routesRootDir, filePath);
+  if (discovered.kind !== "http") {
+    throw new Error(
+      `HTTP route file "${filePath}" must end with .<method>.ts or be named <method>.ts`,
+    );
+  }
+
+  return {
+    method: discovered.method,
+    path: discovered.path,
+  };
+}
+
+function normalizeHttpTransportFile(
+  routesRootDir: string,
+  filePath: string,
+):
+  | { kind: "http"; method: HttpMethod; path: string }
+  | { kind: "ws"; path: string } {
   const relativePath = path.relative(routesRootDir, filePath);
   const extension = path.extname(relativePath);
   const withoutExtension = relativePath.slice(0, -extension.length);
@@ -137,17 +194,62 @@ export function normalizeHttpRouteFile(
     throw new Error(`Unable to resolve route from "${filePath}"`);
   }
 
-  const methodMatch = lastSegment.match(/^(.*)\.(get|post|put|patch|delete|options|head)$/i);
-  if (!methodMatch) {
-    throw new Error(`HTTP route file "${filePath}" must end with .<method>.ts`);
+  const wsMatch = lastSegment.match(/^(.*)\.ws$/i);
+  if (wsMatch) {
+    const rawName = wsMatch[1];
+    if (!rawName) {
+      throw new Error(`Unable to resolve WebSocket route file "${filePath}"`);
+    }
+
+    return {
+      kind: "ws",
+      path: resolveRoutePath([...segments, rawName]),
+    };
   }
 
-  const rawName = methodMatch[1];
-  const rawMethod = methodMatch[2];
-  if (!rawName || !rawMethod) {
-    throw new Error(`Unable to resolve HTTP route file "${filePath}"`);
+  if (/^ws$/i.test(lastSegment)) {
+    return {
+      kind: "ws",
+      path: resolveRoutePath([...segments, lastSegment]),
+    };
   }
-  const pathSegments = [...segments, rawName]
+
+  const methodMatch = lastSegment.match(/^(.*)\.(get|post|put|patch|delete|options|head)$/i);
+  if (methodMatch) {
+    const rawName = methodMatch[1];
+    const rawMethod = methodMatch[2];
+    if (!rawName || !rawMethod) {
+      throw new Error(`Unable to resolve HTTP route file "${filePath}"`);
+    }
+
+    return {
+      kind: "http",
+      method: rawMethod.toUpperCase() as HttpMethod,
+      path: resolveRoutePath([...segments, rawName]),
+    };
+  }
+
+  const methodOnlyMatch = lastSegment.match(/^(get|post|put|patch|delete|options|head)$/i);
+  if (methodOnlyMatch) {
+    const [, rawMethod] = methodOnlyMatch;
+    if (!rawMethod) {
+      throw new Error(`Unable to resolve HTTP route file "${filePath}"`);
+    }
+
+    return {
+      kind: "http",
+      method: rawMethod.toUpperCase() as HttpMethod,
+      path: resolveRoutePath(segments),
+    };
+  }
+
+  throw new Error(
+    `HTTP route file "${filePath}" must end with .<method>.ts, be named <method>.ts, or end with .ws.ts`,
+  );
+}
+
+function resolveRoutePath(segments: string[]): string {
+  const pathSegments = segments
     .map((segment) => normalizeRouteSegment(segment))
     .filter(Boolean);
 
@@ -155,10 +257,7 @@ export function normalizeHttpRouteFile(
     pathSegments.pop();
   }
 
-  return {
-    method: rawMethod.toUpperCase() as HttpMethod,
-    path: pathSegments.length === 0 ? "/" : `/${pathSegments.join("/")}`,
-  };
+  return pathSegments.length === 0 ? "/" : `/${pathSegments.join("/")}`;
 }
 
 function normalizeRouteSegment(segment: string): string {
@@ -248,12 +347,10 @@ async function collectFiles(rootDir: string): Promise<string[]> {
 function extractRoute(
   moduleExports: Record<string, unknown>,
   filePath: string,
-  routesRootDir: string,
+  discovered: { method: HttpMethod; path: string },
 ): HttpHandlerDefinition {
   for (const value of Object.values(moduleExports)) {
     if (isHttpHandlerDefinition(value)) {
-      const discovered = normalizeHttpRouteFile(routesRootDir, filePath);
-
       return {
         ...value,
         method: value.method ?? discovered.method,
@@ -263,6 +360,41 @@ function extractRoute(
   }
 
   throw new Error(`HTTP route module "${filePath}" does not export a handler`);
+}
+
+function extractWsRoute(
+  moduleExports: Record<string, unknown>,
+  filePath: string,
+  discoveredPath: string,
+): Pick<ResolvedHttpWsRouteModule, "route" | "app"> {
+  for (const value of Object.values(moduleExports)) {
+    if (isHttpWsRouteDefinition(value)) {
+      return {
+        route: {
+          ...value,
+          path: value.path ?? discoveredPath,
+        } satisfies HttpWsRouteDefinition,
+      };
+    }
+
+    if (isElysiaApp(value)) {
+      return {
+        app: value,
+      };
+    }
+  }
+
+  throw new Error(`WebSocket route module "${filePath}" does not export a ws route`);
+}
+
+function isElysiaApp(value: unknown): value is Elysia {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    typeof (value as Elysia).use === "function" &&
+    typeof (value as Elysia).route === "function" &&
+    typeof (value as Elysia).ws === "function",
+  );
 }
 
 function extractPlugin(

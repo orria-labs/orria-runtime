@@ -19,6 +19,7 @@ import {
   discoverHttpPlugins,
   discoverHttpRouteModules,
   discoverHttpRoutes,
+  discoverHttpWsRouteModules,
   normalizeHttpRouteFile,
   validateHttpPlugins,
   validateHttpRoutes,
@@ -68,17 +69,36 @@ export default defineHandler()({
   handle: () => ({ ok: true }),
 });
 `,
+      "src/transport/http/router/v1/user/post.ts": `import { defineHandler } from "${elysiaImport}";
+
+export default defineHandler()({
+  handle: () => ({ created: true }),
+});
+`,
+      "src/transport/http/router/chat.ws.ts": `import { defineWs } from "${elysiaImport}";
+
+export default defineWs()({
+  options: {
+    message(ws, message) {
+      ws.send(message);
+    },
+  },
+});
+`,
     });
 
     try {
       const routeModules = await discoverHttpRouteModules({ rootDir: project.rootDir });
       const routes = await discoverHttpRoutes({ rootDir: project.rootDir });
+      const wsRoutes = await discoverHttpWsRouteModules({ rootDir: project.rootDir });
       const plugins = await discoverHttpPlugins({ rootDir: project.rootDir });
 
-      expect(routeModules.map((entry) => entry.id)).toEqual(["GET /v1/user-status"]);
+      expect(routeModules.map((entry) => entry.id)).toEqual(["GET /v1/user-status", "POST /v1/user"]);
       expect(routes.map((entry) => `${entry.method} ${entry.path}`)).toEqual([
         "GET /v1/user-status",
+        "POST /v1/user",
       ]);
+      expect(wsRoutes.map((entry) => entry.route?.path)).toEqual(["/chat"]);
       expect(plugins.map((entry) => entry.name)).toEqual(["request-source"]);
       expect(
         normalizeHttpRouteFile(
@@ -86,6 +106,12 @@ export default defineHandler()({
           path.join(project.rootDir, "src/transport/http/router/v1/user-status.get.ts"),
         ),
       ).toEqual({ method: "GET", path: "/v1/user-status" });
+      expect(
+        normalizeHttpRouteFile(
+          path.join(project.rootDir, "src/transport/http/router"),
+          path.join(project.rootDir, "src/transport/http/router/v1/user/post.ts"),
+        ),
+      ).toEqual({ method: "POST", path: "/v1/user" });
 
       expect(() =>
         validateHttpRoutes([
@@ -154,6 +180,16 @@ export default defineHandler()({
   options: {
     detail: {
       summary: "Reads user status",
+    },
+  },
+});
+`,
+      "src/transport/http/router/chat.ws.ts": `import { defineWs } from "${elysiaImport}";
+
+export default defineWs()({
+  options: {
+    message(ws, message) {
+      ws.send(message);
     },
   },
 });
