@@ -85,6 +85,16 @@ export default defineWs()({
   },
 });
 `,
+      "src/transport/http/router/index.ws.ts": `import { defineWs } from "${elysiaImport}";
+
+export default defineWs()({
+  options: {
+    message(ws, message) {
+      ws.send(message);
+    },
+  },
+});
+`,
     });
 
     try {
@@ -98,7 +108,7 @@ export default defineWs()({
         "GET /v1/user-status",
         "POST /v1/user",
       ]);
-      expect(wsRoutes.map((entry) => entry.route?.path)).toEqual(["/chat"]);
+      expect(wsRoutes.map((entry) => entry.route?.path)).toEqual(["/chat", "/"]);
       expect(plugins.map((entry) => entry.name)).toEqual(["request-source"]);
       expect(
         normalizeHttpRouteFile(
@@ -185,6 +195,16 @@ export default defineHandler()({
 });
 `,
       "src/transport/http/router/chat.ws.ts": `import { defineWs } from "${elysiaImport}";
+
+export default defineWs()({
+  options: {
+    message(ws, message) {
+      ws.send(message);
+    },
+  },
+});
+`,
+      "src/transport/http/router/index.ws.ts": `import { defineWs } from "${elysiaImport}";
 
 export default defineWs()({
   options: {

@@ -96,5 +96,6 @@ src/transport/http/
 - `users.get.ts` → `GET /users`
 - `users/post.ts` → `POST /users`
 - `index.get.ts` → `GET /`
+- `index.ws.ts` → `WS /`
 - `chat.ws.ts` → `WS /chat`
 - `ws.ts` → `WS /ws`
