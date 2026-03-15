@@ -2,6 +2,8 @@
 
 Cron transport adapter для `@orria-labs/runtime` поверх `croner`.
 
+- npm: https://www.npmjs.com/package/@orria-labs/runtime-croner
+
 ## Что поддерживается
 
 - `createCronAdapter({ rootDir })` для file-based discovery schedules

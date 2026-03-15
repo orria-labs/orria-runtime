@@ -2,6 +2,8 @@
 
 HTTP transport adapter для `@orria-labs/runtime` поверх `elysia`.
 
+- npm: https://www.npmjs.com/package/@orria-labs/runtime-elysia
+
 ## Что поддерживается
 
 - `createHttpAdapter({ rootDir })` для file-based discovery routes/plugins

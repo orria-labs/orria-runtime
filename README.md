@@ -11,10 +11,10 @@ Orria Runtime — это meta-framework для модульных backend-при
 
 ### Пакеты
 
-- `@orria-labs/runtime`
-- `@orria-labs/runtime-elysia`
-- `@orria-labs/runtime-citty`
-- `@orria-labs/runtime-croner`
+- `@orria-labs/runtime` — https://www.npmjs.com/package/@orria-labs/runtime
+- `@orria-labs/runtime-elysia` — https://www.npmjs.com/package/@orria-labs/runtime-elysia
+- `@orria-labs/runtime-citty` — https://www.npmjs.com/package/@orria-labs/runtime-citty
+- `@orria-labs/runtime-croner` — https://www.npmjs.com/package/@orria-labs/runtime-croner
 
 ## Что уже реализовано
 

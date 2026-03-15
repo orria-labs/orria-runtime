@@ -2,6 +2,8 @@
 
 CLI transport adapter для `@orria-labs/runtime` поверх `citty`.
 
+- npm: https://www.npmjs.com/package/@orria-labs/runtime-citty
+
 ## Что поддерживается
 
 - `createCliAdapter({ rootDir })` для file-based discovery commands

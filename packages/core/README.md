@@ -2,6 +2,8 @@
 
 Пакет с runtime-ядром framework-а.
 
+- npm: https://www.npmjs.com/package/@orria-labs/runtime
+
 ## Включает
 
 - declaration helpers
