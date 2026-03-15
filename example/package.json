@@ -1,0 +1,30 @@
+{
+	"name": "orria-runtime-example",
+	"type": "module",
+	"private": true,
+	"scripts": {
+		"dev": "bun run ./src/index.ts",
+		"dev:watch": "bun run --watch ./src/index.ts",
+		"generate": "orria-runtime generate --root . --out src/generated/core",
+		"ort": "orria-runtime",
+		"typecheck": "tsc --noEmit",
+		"test": "bun test src"
+	},
+	"dependencies": {
+		"@elysiajs/openapi": "^1.4.14",
+		"@orria-labs/runtime-citty": "workspace:*",
+		"@orria-labs/runtime-croner": "workspace:*",
+		"@orria-labs/runtime-elysia": "workspace:*",
+		"@orria-labs/runtime": "workspace:*",
+		"citty": "^0.2.1",
+		"croner": "^10.0.1",
+		"elysia": "^1.4.27",
+		"zod": "4"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5.0.0 || ^6.0.0-beta"
+	}
+}

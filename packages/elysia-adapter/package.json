@@ -1,0 +1,32 @@
+{
+	"name": "@orria-labs/runtime-elysia",
+	"version": "0.1.0",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"build": "bun ../../scripts/build-package.ts .",
+		"typecheck": "tsc --noEmit",
+		"test": "bun test src"
+	},
+	"dependencies": {
+		"@orria-labs/runtime": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"elysia": "^1.4.27"
+	},
+	"peerDependencies": {
+		"elysia": "^1.4.27",
+		"typescript": "^5.0.0 || ^6.0.0-beta"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"description": "Elysia HTTP adapter for Orria Runtime",
+	"sideEffects": false,
+	"engines": {
+		"bun": ">=1.3.10"
+	}
+}

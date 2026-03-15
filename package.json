@@ -1,0 +1,27 @@
+{
+	"name": "orria-runtime",
+	"private": true,
+	"type": "module",
+	"workspaces": [
+		"packages/*",
+		"example"
+	],
+	"scripts": {
+		"generate:example": "bun run --cwd example generate",
+		"build": "bun run --cwd packages/core build && bun run --cwd packages/elysia-adapter build && bun run --cwd packages/citty-adapter build && bun run --cwd packages/croner-adapter build",
+		"typecheck": "bun run --cwd packages/core typecheck && bun run --cwd packages/elysia-adapter typecheck && bun run --cwd packages/citty-adapter typecheck && bun run --cwd packages/croner-adapter typecheck && bun run --cwd example typecheck",
+		"test": "bun test packages/core/src packages/elysia-adapter/src packages/citty-adapter/src packages/croner-adapter/src example/src",
+		"changeset": "changeset",
+		"release:version": "changeset version",
+		"release:check": "bun run generate:example && bun run typecheck && bun run test && bun run build",
+		"release:dry-run": "bun run release:check && bun run scripts/publish-packages.ts --dry-run",
+		"release:publish": "bun run release:check && bun run scripts/publish-packages.ts"
+	},
+	"devDependencies": {
+		"@changesets/cli": "^2.30.0",
+		"@types/bun": "latest",
+		"@types/node": "^24.0.0",
+		"tsup": "^8.5.1",
+		"typescript": "^5.8.2"
+	}
+}
