@@ -14,6 +14,7 @@ import type {
 } from "@orria-labs/runtime";
 
 import { createHttpAdapter } from "./adapter.ts";
+import { generateHttpAppRegistryArtifacts } from "./codegen/generate-app-registry.ts";
 import { generateHttpPluginRegistryArtifacts } from "./codegen/generate-plugin-registry.ts";
 import {
   discoverHttpPlugins,
@@ -329,6 +330,64 @@ export default definePlugin({
       expect(result.refs).toEqual(["request-source", "source"]);
       expect(output).toContain('"request-source": typeof import("../../transport/http/plugins/request-source.ts").default;');
       expect(output).toContain('"source": typeof import("../../transport/http/plugins/request-source.ts").default;');
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it("generates typed app registry for discovered routes and plugins", async () => {
+    const elysiaImport = path
+      .join(import.meta.dir, "..", "..", "index.ts")
+      .split(path.sep)
+      .join("/");
+
+    const project = await createTempProject({
+      "src/transport/http/plugins/request-source.ts": `import { definePlugin } from "${elysiaImport}";
+
+export default definePlugin({
+  setup: ({ app }) => app.derive(() => ({
+    requestSource: "http",
+  })),
+});
+`,
+      "src/transport/http/router/health.get.ts": `import { defineHandler } from "${elysiaImport}";
+
+export default defineHandler()({
+  handle: () => ({ ok: true }),
+});
+`,
+      "src/transport/http/router/chat.ws.ts": `import { defineWs } from "${elysiaImport}";
+
+export default defineWs()({
+  options: {
+    message(ws, message) {
+      ws.send(message);
+    },
+  },
+});
+`,
+    });
+
+    try {
+      const result = await generateHttpAppRegistryArtifacts({
+        rootDir: project.rootDir,
+        globalPlugins: ["request-source"],
+      });
+      const output = await readFile(
+        path.join(project.rootDir, result.outFile),
+        "utf8",
+      );
+      const registryOutput = await readFile(
+        path.join(project.rootDir, result.registryOutFile),
+        "utf8",
+      );
+
+      expect(output).toContain('declare const globalPlugin0: ResolveHttpPluginApp<"request-source">;');
+      expect(output).toContain('declare const routeBase0: ResolveHttpRouteBaseApp<typeof route0>;');
+      expect(output).toContain('.use(routeBase0.route("GET", "/health",');
+      expect(output).toContain('.use(wsRouteBase0.ws("/chat", wsRoute0.options))');
+      expect(registryOutput).toContain('interface HttpDiscoveredAppRegistry');
+      expect(registryOutput).toContain('app: typeof import("./app.ts").app;');
     } finally {
       await project.cleanup();
     }

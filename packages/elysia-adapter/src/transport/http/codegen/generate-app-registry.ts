@@ -5,12 +5,14 @@ import {
   discoverHttpRouteModules,
   discoverHttpWsRouteModules,
 } from "../discovery.ts";
+import type { HttpPluginRef } from "../types.ts";
 
 export interface GenerateHttpAppRegistryOptions {
   rootDir?: string;
   routesDir?: string;
   outFile?: string;
   registryOutFile?: string;
+  globalPlugins?: Array<string | HttpPluginRef>;
 }
 
 export async function generateHttpAppRegistryArtifacts(
@@ -39,6 +41,7 @@ export async function generateHttpAppRegistryArtifacts(
       outFile: absoluteOutFile,
       routes,
       wsRoutes,
+      globalPlugins: options.globalPlugins,
     }),
     "utf8",
   );
@@ -62,9 +65,11 @@ function renderHttpAppFile(args: {
   outFile: string;
   routes: Awaited<ReturnType<typeof discoverHttpRouteModules>>;
   wsRoutes: Awaited<ReturnType<typeof discoverHttpWsRouteModules>>;
+  globalPlugins?: Array<string | HttpPluginRef>;
 }): string {
   const imports = [
     `import { Elysia } from "elysia";`,
+    `import type { HttpHandlerDefinition, HttpMethod, ResolveHttpPluginApp, ResolveHttpRouteBaseApp, ResolveHttpWsRouteBaseApp } from "@orria-labs/runtime-elysia";`,
     ...args.routes.map((entry, index) =>
       `import route${index} from ${JSON.stringify(relativeImport(args.outFile, entry.filePath))};`
     ),
@@ -73,25 +78,63 @@ function renderHttpAppFile(args: {
     ),
   ];
 
-  const routeLines = args.routes.map((entry, index) => {
-    const method = entry.route.method!.toLowerCase();
-    return [
-      `  // @ts-expect-error generated route typing mirrors adapter-mounted handlers`,
-      `  .${method}(${JSON.stringify(entry.route.path)}, route${index}.handle, route${index}.options)`
-    ].join("\n");
-  });
+  const pluginDecls = (args.globalPlugins ?? [])
+    .map((pluginRef, index) => typeof pluginRef === "string"
+      ? `declare const globalPlugin${index}: ResolveHttpPluginApp<${JSON.stringify(pluginRef)}>;`
+      : undefined)
+    .filter(Boolean);
+
+  const handlerHelperDecls = args.routes.length > 0
+    ? [
+      `type ResolveGeneratedRouteHandler<TRoute extends HttpHandlerDefinition<any, any, any, any, any, any>, TMethod extends HttpMethod, TPath extends string> =`,
+      `  ResolveHttpRouteBaseApp<TRoute>["route"] extends (`,
+      `    method: TMethod,`,
+      `    path: TPath,`,
+      `    handler: infer THandler,`,
+      `    hook?: TRoute["options"],`,
+      `  ) => any ? THandler : never;`,
+      `declare function toElysiaHandler<TRoute extends HttpHandlerDefinition<any, any, any, any, any, any>, TMethod extends HttpMethod, TPath extends string>(`,
+      `  route: TRoute,`,
+      `): ResolveGeneratedRouteHandler<TRoute, TMethod, TPath>;`,
+    ]
+    : [];
+
+  const routeDecls = args.routes.map(
+    (_entry, index) => `declare const routeBase${index}: ResolveHttpRouteBaseApp<typeof route${index}>;`,
+  );
+
+  const wsDecls = args.wsRoutes.map((entry, index) => {
+    if (entry.app) {
+      return undefined;
+    }
+
+    return `declare const wsRouteBase${index}: ResolveHttpWsRouteBaseApp<typeof wsRoute${index}>;`;
+  }).filter(Boolean);
+
+  const pluginLines = (args.globalPlugins ?? [])
+    .map((pluginRef, index) => typeof pluginRef === "string"
+      ? `  .use(globalPlugin${index})`
+      : undefined)
+    .filter(Boolean);
+
+  const routeLines = args.routes.map(
+    (entry, index) => `  .use(routeBase${index}.route(${JSON.stringify(entry.route.method!)}, ${JSON.stringify(entry.route.path)}, toElysiaHandler<typeof route${index}, ${JSON.stringify(entry.route.method!)}, ${JSON.stringify(entry.route.path)}>(route${index}), route${index}.options))`,
+  );
 
   const wsLines = args.wsRoutes.map((entry, index) => {
     if (entry.app) {
       return `  .use(wsRoute${index})`;
     }
 
-    return `  .ws(${JSON.stringify(entry.route?.path ?? "/")}, wsRoute${index}.options)`;
+    return `  .use(wsRouteBase${index}.ws(${JSON.stringify(entry.route?.path ?? "/")}, wsRoute${index}.options))`;
   });
 
-  const chain = [...routeLines, ...wsLines].join("\n");
+  const declarations = [...pluginDecls, ...handlerHelperDecls, ...routeDecls, ...wsDecls].join("\n");
+  const chain = [...pluginLines, ...routeLines, ...wsLines].join("\n");
 
   return `${imports.join("\n")}
+
+${declarations}
 
 export const app = new Elysia()
 ${chain || ""};

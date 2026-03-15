@@ -128,6 +128,7 @@ export function createHttpAdapter<
           await generateHttpAppRegistryArtifacts({
             rootDir: options.rootDir,
             routesDir: options.routesDir,
+            globalPlugins: options.plugins,
           });
           await generateHttpPluginRegistryArtifacts({
             rootDir: options.rootDir,
@@ -172,6 +173,7 @@ export function createHttpAdapter<
               await generateHttpAppRegistryArtifacts({
                 rootDir: options.rootDir,
                 routesDir: options.routesDir,
+                globalPlugins: options.plugins,
               });
               await generateHttpPluginRegistryArtifacts({
                 rootDir: options.rootDir,
