@@ -1,4 +1,6 @@
 import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineCommand, renderUsage, type CommandDef } from "citty";
 
 import { runInstalledAdapterCodegens } from "./codegen.ts";
@@ -9,8 +11,11 @@ import {
 import { generateCoreArtifacts } from "../codegen/generate.ts";
 
 interface PackageManifest {
+  name?: string;
   version?: string;
 }
+
+const runtimePackageName = "@orria-labs/runtime";
 
 const packageVersion = await readPackageVersion();
 
@@ -149,11 +154,43 @@ export const orriaRuntimeCommand = defineCommand({
   },
 });
 
-async function readPackageVersion(): Promise<string> {
-  const source = await readFile(new URL("../../package.json", import.meta.url), "utf8");
-  const manifest = JSON.parse(source) as PackageManifest;
+export async function readPackageVersion(importMetaUrlValue: string = import.meta.url): Promise<string> {
+  const manifest = await readRuntimePackageManifest(importMetaUrlValue);
 
   return manifest.version ?? "0.0.0";
+}
+
+async function readRuntimePackageManifest(importMetaUrlValue: string): Promise<PackageManifest> {
+  let currentDir = path.dirname(fileURLToPath(importMetaUrlValue));
+
+  while (true) {
+    const packageFilePath = path.join(currentDir, "package.json");
+
+    try {
+      const source = await readFile(packageFilePath, "utf8");
+      const manifest = JSON.parse(source) as PackageManifest;
+
+      if (manifest.name === runtimePackageName) {
+        return manifest;
+      }
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+
+      if (nodeError.code !== "ENOENT") {
+        throw error;
+      }
+    }
+
+    const parentDir = path.dirname(currentDir);
+
+    if (parentDir === currentDir) {
+      break;
+    }
+
+    currentDir = parentDir;
+  }
+
+  throw new Error(`Unable to locate package.json for ${runtimePackageName}`);
 }
 
 function resolveUsageTarget(name?: string): { command: CommandDef<any>; parent?: CommandDef<any> } {
