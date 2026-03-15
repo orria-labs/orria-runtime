@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 const cliPath = path.join(import.meta.dir, "main.ts");
+const packageVersion = await readCliPackageVersion();
 
 describe("orria-runtime CLI", () => {
   it("shows commands and version on default launch", async () => {
@@ -11,7 +12,7 @@ describe("orria-runtime CLI", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Orria Runtime CLI");
-    expect(result.stdout).toContain("v0.1.0");
+    expect(result.stdout).toContain(`v${packageVersion}`);
     expect(result.stdout).toContain("COMMANDS");
     expect(result.stdout).toContain("generate");
     expect(result.stdout).toContain("help");
@@ -23,14 +24,14 @@ describe("orria-runtime CLI", () => {
     const result = await runCli(["--version"]);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout.trim()).toBe("0.1.0");
+    expect(result.stdout.trim()).toBe(packageVersion);
   });
 
   it("supports version as a subcommand", async () => {
     const result = await runCli(["version"]);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout.trim()).toBe("0.1.0");
+    expect(result.stdout.trim()).toBe(packageVersion);
   });
 
   it("supports help as a subcommand", async () => {
@@ -98,6 +99,15 @@ describe("orria-runtime CLI", () => {
     }
   });
 });
+
+async function readCliPackageVersion(): Promise<string> {
+  const packageJsonPath = path.join(import.meta.dir, "..", "..", "package.json");
+  const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+    version: string;
+  };
+
+  return packageJson.version;
+}
 
 async function runCli(args: string[]) {
   const proc = Bun.spawn(["bun", cliPath, ...args], {

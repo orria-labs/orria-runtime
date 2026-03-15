@@ -7,7 +7,7 @@ import workflowUserRegistration from "../../modules/user/registration.workflow.t
 
 export const manifest: GeneratedManifest<GeneratedBusTypes> = {
   version: 1,
-  generatedAt: "2026-03-15T09:10:24.157Z",
+  generatedAt: "2026-03-15T09:37:14.934Z",
   entries: [
     {
       key: "action.user.create",
