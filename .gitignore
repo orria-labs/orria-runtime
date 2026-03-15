@@ -1,4 +1,5 @@
 .npmrc
+q
 
 # dependencies (bun install)
 node_modules

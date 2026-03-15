@@ -1,4 +1,4 @@
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export type InitAdapterName = "http" | "cli" | "cron";
@@ -26,6 +26,47 @@ interface RenderScaffoldOptions {
 
 const DEFAULT_ADAPTERS: InitAdapterName[] = ["http", "cli", "cron"];
 const SUPPORTED_ADAPTERS = new Set<InitAdapterName>(["http", "cli", "cron"]);
+const gitIgnoreFilePath = ".gitignore";
+const gitIgnoreSections = [
+  {
+    title: "# dependencies (bun install)",
+    entries: ["node_modules"],
+  },
+  {
+    title: "# output",
+    entries: ["out", "dist", "*.tgz"],
+  },
+  {
+    title: "# code coverage",
+    entries: ["coverage", "*.lcov"],
+  },
+  {
+    title: "# logs",
+    entries: ["logs", "_.log", "report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json"],
+  },
+  {
+    title: "# dotenv environment variable files",
+    entries: [
+      ".env",
+      ".env.development.local",
+      ".env.test.local",
+      ".env.production.local",
+      ".env.local",
+    ],
+  },
+  {
+    title: "# caches",
+    entries: [".eslintcache", ".cache", "*.tsbuildinfo"],
+  },
+  {
+    title: "# IntelliJ based IDEs",
+    entries: [".idea"],
+  },
+  {
+    title: "# Finder (MacOS) folder config",
+    entries: [".DS_Store"],
+  },
+] as const;
 
 export function parseInitAdapters(value?: string): InitAdapterName[] {
   if (!value) {
@@ -66,11 +107,16 @@ export async function initializeProjectScaffold(
     adapters,
     version,
   });
+  files[gitIgnoreFilePath] = await resolveGitIgnoreContent(path.join(rootDir, gitIgnoreFilePath));
 
   await mkdir(rootDir, { recursive: true });
 
   if (!options.force) {
     for (const relativeFilePath of Object.keys(files)) {
+      if (relativeFilePath === gitIgnoreFilePath) {
+        continue;
+      }
+
       const absoluteFilePath = path.join(rootDir, relativeFilePath);
 
       try {
@@ -114,7 +160,7 @@ function renderScaffoldFiles(options: RenderScaffoldOptions): Record<string, str
   const hasCron = options.adapters.includes("cron");
 
   return {
-    ".gitignore": renderGitIgnore(),
+    [gitIgnoreFilePath]: renderGitIgnore(),
     "package.json": renderPackageJson(options),
     "tsconfig.json": renderTsconfig(),
     "src/config.ts": renderConfigFile(),
@@ -146,9 +192,52 @@ function renderScaffoldFiles(options: RenderScaffoldOptions): Record<string, str
 }
 
 function renderGitIgnore(): string {
-  return `node_modules
-.DS_Store
+  return `${gitIgnoreSections
+    .map((section) => `${section.title}\n${section.entries.join("\n")}`)
+    .join("\n\n")}
 `;
+}
+
+async function resolveGitIgnoreContent(filePath: string): Promise<string> {
+  try {
+    const existingContent = await readFile(filePath, "utf8");
+
+    if (existingContent.trim() === "") {
+      return renderGitIgnore();
+    }
+
+    return mergeGitIgnore(existingContent);
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+
+    if (nodeError.code === "ENOENT") {
+      return renderGitIgnore();
+    }
+
+    throw error;
+  }
+}
+
+function mergeGitIgnore(existingContent: string): string {
+  const normalizedContent = existingContent.replaceAll("\r\n", "\n");
+  const existingLines = new Set(normalizedContent.split("\n"));
+  const missingBlocks = gitIgnoreSections
+    .map((section) => {
+      const missingEntries = section.entries.filter((entry) => !existingLines.has(entry));
+
+      if (missingEntries.length === 0) {
+        return undefined;
+      }
+
+      return `${section.title}\n${missingEntries.join("\n")}`;
+    })
+    .filter((block) => block !== undefined);
+
+  if (missingBlocks.length === 0) {
+    return normalizedContent;
+  }
+
+  return `${normalizedContent.trimEnd()}\n\n${missingBlocks.join("\n\n")}\n`;
 }
 
 function renderPackageJson(options: RenderScaffoldOptions): string {
