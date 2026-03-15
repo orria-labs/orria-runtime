@@ -99,3 +99,19 @@ src/transport/http/
 - `index.ws.ts` → `WS /`
 - `chat.ws.ts` → `WS /chat`
 - `ws.ts` → `WS /ws`
+
+## Typed SDK for discovered routes
+
+Если вы хотите использовать `typeof app.adapter.http.app` как SDK-тип для `edenFetch`/`edenTreaty`,
+адаптер теперь генерирует `src/generated/http/app.ts` и `src/generated/http/app-registry.d.ts`.
+
+Чтобы не получить циклическую типизацию между generated app и file-based route modules,
+удобно держать typed route factories отдельно от runtime adapter, например в `src/transport/http/contract.ts`:
+
+```ts
+export const defineHandler = createHandlerFactory<...>()({ plugins: ["spec"] });
+export const defineWs = createWsFactory<...>()({ plugins: ["spec"] });
+```
+
+Тогда route modules импортируют `defineHandler` / `defineWs` из `contract.ts`,
+а bootstrap импортирует `httpAdapter` из `adapter.ts`.

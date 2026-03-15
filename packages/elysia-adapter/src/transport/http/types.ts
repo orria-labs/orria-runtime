@@ -71,6 +71,14 @@ export interface HttpAdapterWatchOptions {
 
 export interface HttpPluginRegistry {}
 
+export interface HttpDiscoveredAppRegistry {}
+
+type RegisteredHttpDiscoveredApp = HttpDiscoveredAppRegistry extends {
+  app: infer TApp extends AnyElysia;
+}
+  ? TApp
+  : Elysia;
+
 export type RegisteredHttpPluginRef = Extract<keyof HttpPluginRegistry, string>;
 
 export type HttpBaseApp<
@@ -182,6 +190,15 @@ type MergeHttpAppInstances<
       resolve: TSingleton["resolve"];
     }, TDefinitions, TMetadata, TRoutes, TEphemeral, TVolatile>;
 
+export type ResolveHttpAdapterApp<
+  TBuses extends BusTypesContract = BusTypesContract,
+  TDatabase extends DatabaseAdapter = DatabaseAdapter,
+  TPlugins extends readonly HttpPluginRef<TBuses, TDatabase>[] | undefined = undefined,
+> = MergeHttpAppInstances<[
+  ResolveHttpHandlerApp<TBuses, TDatabase, HttpBaseApp<TBuses, TDatabase>, TPlugins>,
+  RegisteredHttpDiscoveredApp,
+]>;
+
 export type ResolveHttpHandlerApp<
   TBuses extends BusTypesContract = BusTypesContract,
   TDatabase extends DatabaseAdapter = DatabaseAdapter,
@@ -291,10 +308,11 @@ export interface BuildHttpApplicationOptions<
 export interface HttpAdapterInstance<
   TBuses extends BusTypesContract = BusTypesContract,
   TDatabase extends DatabaseAdapter = DatabaseAdapter,
+  TApp extends AnyElysia = Elysia,
 > {
   kind: "http";
   readonly watching: boolean;
-  app: Elysia;
+  app: TApp;
   listen(...args: Parameters<Elysia["listen"]>): ReturnType<Elysia["listen"]>;
   handle(request: Request): Promise<Response>;
   reload(): Promise<void>;
@@ -306,8 +324,9 @@ export interface HttpAdapterDefinition<
   TBuses extends BusTypesContract = BusTypesContract,
   TDatabase extends DatabaseAdapter = DatabaseAdapter,
   TPlugins extends readonly HttpPluginRef<TBuses, TDatabase>[] | undefined = undefined,
+  TApp extends AnyElysia = ResolveHttpAdapterApp<TBuses, TDatabase, TPlugins>,
 > {
-  adapter: ApplicationAdapterFactory<HttpAdapterInstance<TBuses, TDatabase>, TBuses, TDatabase>;
+  adapter: ApplicationAdapterFactory<HttpAdapterInstance<TBuses, TDatabase, TApp>, TBuses, TDatabase>;
   defineHandler: ReturnType<
     typeof import("./router/define-handler.ts").createHandlerFactory<
       TBuses,

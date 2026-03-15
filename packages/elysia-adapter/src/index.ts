@@ -1,5 +1,6 @@
 export { buildHttpApplication, createHttpAdapter, defineHttpAdapter } from "./transport/http/adapter.ts";
 export { orriaAdapterCodegen } from "./transport/http/codegen/index.ts";
+export { generateHttpAppRegistryArtifacts } from "./transport/http/codegen/generate-app-registry.ts";
 export { generateHttpPluginRegistryArtifacts } from "./transport/http/codegen/generate-plugin-registry.ts";
 export {
   discoverHttpPlugins,
@@ -19,6 +20,7 @@ export type {
   HttpAdapterInstance,
   HttpAdapterWatchOptions,
   HttpBaseApp,
+  HttpDiscoveredAppRegistry,
   HttpHandlerArgs,
   HttpHandlerContext,
   HttpHandlerDefinition,
@@ -31,6 +33,7 @@ export type {
   HttpPluginDefinition,
   HttpPluginRef,
   RegisteredHttpPluginRef,
+  ResolveHttpAdapterApp,
   ResolveHttpHandlerApp,
   ResolvedHttpPluginModule,
   ResolvedHttpRouteModule,

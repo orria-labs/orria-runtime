@@ -9,6 +9,7 @@ import {
 import { Elysia } from "elysia";
 import path from "node:path";
 
+import { generateHttpAppRegistryArtifacts } from "./codegen/generate-app-registry.ts";
 import { generateHttpPluginRegistryArtifacts } from "./codegen/generate-plugin-registry.ts";
 import {
   discoverHttpPlugins,
@@ -24,12 +25,11 @@ import type {
   HttpAdapterInstance,
   HttpAdapterDefinition,
   HttpAdapterWatchOptions,
-  HttpBaseApp,
   HttpHandlerDefinition,
   HttpPluginDefinition,
   HttpPluginRef,
   HttpWsRouteDefinition,
-  ResolveHttpHandlerApp,
+  ResolveHttpAdapterApp,
   ResolvedHttpWsRouteModule,
 } from "./types.ts";
 
@@ -103,16 +103,21 @@ export async function buildHttpApplication<
 export function createHttpAdapter<
   TBuses extends BusTypesContract = BusTypesContract,
   TDatabase extends DatabaseAdapter = DatabaseAdapter,
+  const TPlugins extends readonly HttpPluginRef<TBuses, TDatabase>[] | undefined = undefined,
 >(
-  options: BuildHttpApplicationOptions<TBuses, TDatabase> = {},
+  options: BuildHttpApplicationOptions<TBuses, TDatabase> & {
+    plugins?: TPlugins;
+  } = {},
 ) {
-  return defineTransportAdapter<HttpAdapterInstance<TBuses, TDatabase>, TBuses, TDatabase>(
+  return defineTransportAdapter<HttpAdapterInstance<TBuses, TDatabase, ResolveHttpAdapterApp<TBuses, TDatabase, TPlugins>>, TBuses, TDatabase>(
     async (adapterContext) => {
-      let app = await buildHttpApplication(adapterContext, options);
-      let listeningApp: ReturnType<Elysia["listen"]> | undefined;
+      type AdapterApp = ResolveHttpAdapterApp<TBuses, TDatabase, TPlugins>;
+
+      let app = await buildHttpApplication(adapterContext, options) as unknown as AdapterApp;
+      let listeningApp: { stop?: () => unknown } | undefined;
       let listeningArgs: Parameters<Elysia["listen"]> | undefined;
       let watcher = createHttpWatcher(options, adapterContext, async () => {
-        app = await buildHttpApplication(adapterContext, options);
+        app = await buildHttpApplication(adapterContext, options) as unknown as AdapterApp;
 
         if (listeningApp && listeningArgs) {
           await Promise.resolve((listeningApp as { stop?: () => unknown }).stop?.());
@@ -120,6 +125,10 @@ export function createHttpAdapter<
         }
 
         if (options.rootDir) {
+          await generateHttpAppRegistryArtifacts({
+            rootDir: options.rootDir,
+            routesDir: options.routesDir,
+          });
           await generateHttpPluginRegistryArtifacts({
             rootDir: options.rootDir,
             pluginsDir: options.pluginsDir,
@@ -137,12 +146,13 @@ export function createHttpAdapter<
         },
         listen: (...args) => {
           listeningArgs = args;
-          listeningApp = app.listen(...args);
-          return listeningApp;
+          const instance = app.listen(...args);
+          listeningApp = instance as { stop?: () => unknown } | undefined;
+          return instance as unknown as ReturnType<Elysia["listen"]>;
         },
         handle: (request) => app.handle(request),
         reload: async () => {
-          app = await buildHttpApplication(adapterContext, options);
+          app = await buildHttpApplication(adapterContext, options) as unknown as AdapterApp;
 
           if (listeningApp && listeningArgs) {
             await Promise.resolve((listeningApp as { stop?: () => unknown }).stop?.());
@@ -151,7 +161,7 @@ export function createHttpAdapter<
         },
         watch: async (watchOptions) => {
           watcher = createHttpWatcher(options, adapterContext, async () => {
-            app = await buildHttpApplication(adapterContext, options);
+            app = await buildHttpApplication(adapterContext, options) as unknown as AdapterApp;
 
             if (listeningApp && listeningArgs) {
               await Promise.resolve((listeningApp as { stop?: () => unknown }).stop?.());
@@ -159,6 +169,10 @@ export function createHttpAdapter<
             }
 
             if (options.rootDir) {
+              await generateHttpAppRegistryArtifacts({
+                rootDir: options.rootDir,
+                routesDir: options.routesDir,
+              });
               await generateHttpPluginRegistryArtifacts({
                 rootDir: options.rootDir,
                 pluginsDir: options.pluginsDir,
@@ -170,7 +184,7 @@ export function createHttpAdapter<
         unwatch: () => {
           watcher.stop();
         },
-      };
+      } as HttpAdapterInstance<TBuses, TDatabase, AdapterApp>;
     },
   );
 }
@@ -190,7 +204,7 @@ export function defineHttpAdapter<
     // с одним и тем же списком global plugins, чтобы feature-модули импортировали
     // единый источник, а не дублировали конфигурацию в нескольких файлах.
     return {
-      adapter: createHttpAdapter<TBuses, TDatabase>(options),
+      adapter: createHttpAdapter<TBuses, TDatabase, TPlugins>(options),
       defineHandler: createHandlerFactory<
         TBuses,
         TDatabase,
