@@ -7,6 +7,8 @@ import type {
   BusTypesContract,
   ConfigStore,
   DatabaseAdapter,
+  EventBusMethod,
+  ExecutableBusMethod,
   HandlerInvocationMeta,
 } from "../types.ts";
 import { createRuntime, LocalEventTransport } from "./runtime.ts";
@@ -14,27 +16,45 @@ import { createRuntime, LocalEventTransport } from "./runtime.ts";
 interface TestBusTypes extends BusTypesContract {
   action: {
     demo: {
-      run: (
-        input: { email: string },
-        meta?: HandlerInvocationMeta,
-      ) => Promise<{ email: string; normalized: string }>;
+      run: ExecutableBusMethod<{
+        __types__?: {
+          input: { email: string };
+          output: { email: string; normalized: string };
+          handlerInput: { email: string };
+          handlerOutput: { email: string };
+          inputSchema: unknown;
+          returnsSchema: unknown;
+        };
+        kind: "action";
+      }>;
     };
   };
   query: {};
   workflow: {
     demo: {
-      registration: (
-        input: { email: string },
-        meta?: HandlerInvocationMeta,
-      ) => Promise<void>;
+      registration: ExecutableBusMethod<{
+        __types__?: {
+          input: { email: string };
+          output: void;
+          handlerInput: { email: string };
+          handlerOutput: void;
+          inputSchema: unknown;
+          returnsSchema: unknown;
+        };
+        kind: "workflow";
+      }>;
     };
   };
   event: {
     demo: {
-      created: (
-        payload: { email: string },
-        meta?: HandlerInvocationMeta,
-      ) => Promise<void>;
+      created: EventBusMethod<{
+        __types__?: {
+          payload: { email: string };
+          parsedPayload: { email: string };
+          payloadSchema: unknown;
+        };
+        kind: "event";
+      }>;
     };
   };
 }
@@ -180,6 +200,112 @@ describe("runtime", () => {
     expect(actionMethod.$key).toBe("action.demo.run");
     expect(actionMethod.$schema.input).toBe(actionInputSchema);
     expect(actionMethod.$schema.returns).toBe(actionOutputSchema);
+  });
+
+  it("supports unsafe bus calls without schema validation", async () => {
+    const invocations: Array<{ stage: string; email: string }> = [];
+
+    const manifest = {
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      entries: [
+        {
+          key: "action.demo.run",
+          kind: "action" as const,
+          logicalName: "demo.run",
+          modulePath: "memory",
+          declaration: defineAction<TestContext>()({
+            input: createSchema<{ email: string }, { email: string }>((value) => {
+              const input = value as { email: string };
+              return { email: input.email.trim().toLowerCase() };
+            }),
+            returns: createSchema<{ email: string }, { email: string; normalized: string }>((value) => {
+              const output = value as { email: string };
+              return {
+                email: output.email,
+                normalized: output.email.toLowerCase(),
+              };
+            }),
+            handle: async ({ ctx, input }) => {
+              invocations.push({ stage: "action", email: input.email });
+              await ctx.event.demo.created.unsafe({ email: input.email });
+              return { email: input.email };
+            },
+          }),
+        },
+        {
+          key: "event.demo.created",
+          kind: "event" as const,
+          logicalName: "demo.created",
+          modulePath: "memory",
+          declaration: defineEvent({
+            payload: createSchema<{ email: string }, { email: string }>((value) => {
+              const payload = value as { email: string };
+              return { email: payload.email.trim().toLowerCase() };
+            }),
+            version: 1,
+          }),
+        },
+        {
+          key: "workflow.demo.registration",
+          kind: "workflow" as const,
+          logicalName: "demo.registration",
+          modulePath: "memory",
+          declaration: defineWorkflow<TestContext>()({
+            input: createSchema<{ email: string }, { email: string }>((value) => {
+              const input = value as { email: string };
+              return { email: input.email.trim().toLowerCase() };
+            }),
+            returns: createSchema<void, void>(() => undefined),
+            subscribesTo: ["event.demo.created"],
+            handle: ({ input }) => {
+              invocations.push({ stage: "workflow", email: input.email });
+            },
+          }),
+        },
+      ],
+    };
+
+    const registry = createRegistry(manifest);
+    let ctx!: TestContext;
+    const runtime = createRuntime<TestContext, TestBusTypes>({
+      registry,
+      getContext: () => ctx,
+      eventTransport: new LocalEventTransport(),
+    });
+
+    ctx = {
+      console,
+      config: createConfigStore(),
+      database: createDatabaseAdapter(),
+      action: runtime.buses.action,
+      query: runtime.buses.query,
+      workflow: runtime.buses.workflow,
+      event: runtime.buses.event,
+    };
+
+    const safeResult = await ctx.action.demo.run({ email: " Safe@Example.com " });
+    const unsafeResult = await ctx.action.demo.run.unsafe({ email: "Unsafe@Example.com" });
+    await ctx.event.demo.created({ email: " EventSafe@Example.com " });
+    await ctx.event.demo.created.unsafe({ email: "EventUnsafe@Example.com" });
+
+    expect(safeResult).toEqual({
+      email: "safe@example.com",
+      normalized: "safe@example.com",
+    });
+    expect(unsafeResult).toEqual({
+      email: "Unsafe@Example.com",
+    });
+    expect(invocations).toEqual([
+      { stage: "action", email: "safe@example.com" },
+      { stage: "workflow", email: "safe@example.com" },
+      { stage: "action", email: "Unsafe@Example.com" },
+      { stage: "workflow", email: "Unsafe@Example.com" },
+      { stage: "workflow", email: "eventsafe@example.com" },
+      { stage: "workflow", email: "EventUnsafe@Example.com" },
+    ]);
+    expect(ctx.action.demo.run.unsafe.$key).toBe("action.demo.run");
+    expect(ctx.event.demo.created.unsafe.$schema.payload).toBeDefined();
   });
 });
 

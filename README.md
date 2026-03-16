@@ -176,6 +176,16 @@ type CreateUserInput = BusMethodInput<typeof createUser>;
 type CreateUserOutput = BusMethodOutput<typeof createUser>;
 ```
 
+Если schema нужна и для реальной runtime-валидации, но в конкретном trusted-path месте данные уже провалидированы заранее, можно вызвать bypass-вариант:
+
+```ts
+await app.ctx.query.user.get({ userId: "123" });
+await app.ctx.query.user.get.unsafe({ userId: "123" });
+```
+
+- обычный вызов использует `input` / `returns` / `payload` schemas
+- `.unsafe(...)` пропускает schema parsing/validation и работает с handler-level типами
+
 ## Документация
 
 - `docs/models.md` — каноническая модель сущностей и ограничений

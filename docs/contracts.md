@@ -105,7 +105,27 @@ method.$key;
 method.$definition;
 method.$schema.input;
 method.$schema.returns;
+method.unsafe;
 ```
+
+## Safe / unsafe bus calls
+
+По умолчанию bus-метод работает в safe-режиме и применяет declaration schemas.
+
+```ts
+await ctx.query.user.get({ userId: "123" });
+```
+
+Если данные уже провалидированы заранее и повторная schema-валидация не нужна, можно использовать trusted-path вызов:
+
+```ts
+await ctx.query.user.get.unsafe({ userId: "123" });
+```
+
+Разница:
+
+- safe: применяет `input` / `returns` / `payload` schemas
+- unsafe: пропускает schema parsing/validation и использует handler-level input/output types
 
 ## Generated artifacts
 

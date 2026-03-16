@@ -118,6 +118,72 @@ class Runtime<
     }
   }
 
+  async #invokeExecutableUnsafe(
+    entry: ExecutableRegistryEntry,
+    input: unknown,
+    meta: HandlerInvocationMeta,
+  ): Promise<unknown> {
+    const ctx = this.#getContext();
+    const middleware = [...this.#middleware, ...(entry.declaration.middleware ?? [])];
+
+    let index = -1;
+    const run = async (): Promise<unknown> => {
+      index += 1;
+      const current = middleware[index];
+
+      if (!current) {
+        return entry.declaration.handle({ ctx, input, meta });
+      }
+
+      return current(
+        {
+          kind: entry.kind,
+          key: entry.key,
+          input,
+          ctx,
+          meta,
+        },
+        run,
+      );
+    };
+
+    return run();
+  }
+
+  async #publishUnsafe(
+    key: string,
+    payload: unknown,
+    meta: HandlerInvocationMeta = {},
+  ): Promise<void> {
+    const entry = getRegistryEntry(this.#registry, key);
+    if (entry.kind !== "event") {
+      throw new Error(`Handler "${key}" is not an event declaration`);
+    }
+
+    const normalizedMeta = { ...meta };
+
+    await this.#eventTransport.publish({
+      key,
+      payload,
+      meta: normalizedMeta,
+      version: entry.declaration.version,
+    });
+
+    const subscribers = this.#registry.eventSubscribers.get(key) ?? [];
+    for (const subscriber of subscribers) {
+      const subscriberEntry = getRegistryEntry(this.#registry, subscriber.key);
+      if (subscriberEntry.kind !== "workflow") {
+        continue;
+      }
+
+      await this.#invokeExecutableUnsafe(subscriberEntry, payload, {
+        ...normalizedMeta,
+        source: key,
+        eventKey: key,
+      });
+    }
+  }
+
   async #invokeExecutable(
     entry: ExecutableRegistryEntry,
     input: unknown,
@@ -157,9 +223,15 @@ class Runtime<
     const root: Record<string, unknown> = {};
 
     for (const entry of this.#registry.byKind[kind]) {
-      assignPath(root, entry.segments, createExecutableBusMethod(entry, (input, meta) =>
-        this.invoke(kind, entry.key, input, meta),
-      ));
+      assignPath(
+        root,
+        entry.segments,
+        createExecutableBusMethod(
+          entry,
+          (input, meta) => this.invoke(kind, entry.key, input, meta),
+          (input, meta) => this.#invokeExecutableUnsafe(entry, input, meta ?? {}),
+        ),
+      );
     }
 
     return root;
@@ -169,9 +241,15 @@ class Runtime<
     const root: Record<string, unknown> = {};
 
     for (const entry of this.#registry.byKind.event) {
-      assignPath(root, entry.segments, createEventBusMethod(entry, (payload, meta) =>
-        this.publish(entry.key, payload, meta),
-      ));
+      assignPath(
+        root,
+        entry.segments,
+        createEventBusMethod(
+          entry,
+          (payload, meta) => this.publish(entry.key, payload, meta),
+          (payload, meta) => this.#publishUnsafe(entry.key, payload, meta),
+        ),
+      );
     }
 
     return root;
@@ -205,10 +283,23 @@ class Runtime<
 function createExecutableBusMethod(
   entry: ExecutableRegistryEntry,
   invoke: (input: unknown, meta?: HandlerInvocationMeta) => Promise<unknown>,
+  invokeUnsafe: (input: unknown, meta?: HandlerInvocationMeta) => Promise<unknown>,
 ) {
   const method = (input: unknown, meta?: HandlerInvocationMeta) => invoke(input, meta);
+  const unsafeMethod = (input: unknown, meta?: HandlerInvocationMeta) => invokeUnsafe(input, meta);
+
+  Object.assign(unsafeMethod, {
+    $key: entry.key,
+    $kind: entry.kind,
+    $definition: entry.declaration,
+    $schema: {
+      input: entry.declaration.input,
+      returns: entry.declaration.returns,
+    },
+  });
 
   return Object.assign(method, {
+    unsafe: unsafeMethod,
     $key: entry.key,
     $kind: entry.kind,
     $definition: entry.declaration,
@@ -222,10 +313,23 @@ function createExecutableBusMethod(
 function createEventBusMethod(
   entry: EventRegistryEntry,
   publish: (payload: unknown, meta?: HandlerInvocationMeta) => Promise<void>,
+  publishUnsafe: (payload: unknown, meta?: HandlerInvocationMeta) => Promise<void>,
 ) {
   const method = (payload: unknown, meta?: HandlerInvocationMeta) => publish(payload, meta);
+  const unsafeMethod = (payload: unknown, meta?: HandlerInvocationMeta) =>
+    publishUnsafe(payload, meta);
+
+  Object.assign(unsafeMethod, {
+    $key: entry.key,
+    $kind: entry.kind,
+    $definition: entry.declaration,
+    $schema: {
+      payload: entry.declaration.payload,
+    },
+  });
 
   return Object.assign(method, {
+    unsafe: unsafeMethod,
     $key: entry.key,
     $kind: entry.kind,
     $definition: entry.declaration,
