@@ -94,11 +94,9 @@ function renderBusTypes(entries: GeneratedManifestEntry[], outDir: string): stri
   };
 
   return `import type {
+  EventBusMethod,
+  ExecutableBusMethod,
   BusTypesContract,
-  DeclarationInput,
-  DeclarationOutput,
-  DeclarationPayload,
-  HandlerInvocationMeta,
 } from "@orria-labs/runtime";
 ${imports ? `${imports}\n` : ""}
 ${renderNestedInterface("ActionBusShape", grouped.action, "executable")}
@@ -168,10 +166,10 @@ function functionSignature(
   const identifier = declarationIdentifier(entry);
 
   if (mode === "event") {
-    return `(payload: DeclarationPayload<${identifier}>, meta?: HandlerInvocationMeta) => Promise<void>`;
+    return `EventBusMethod<${identifier}>`;
   }
 
-  return `(input: DeclarationInput<${identifier}>, meta?: HandlerInvocationMeta) => Promise<DeclarationOutput<${identifier}>>`;
+  return `ExecutableBusMethod<${identifier}>`;
 }
 
 function declarationIdentifier(entry: GeneratedManifestEntry): string {

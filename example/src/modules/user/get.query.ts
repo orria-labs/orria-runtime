@@ -1,20 +1,22 @@
+import z from "zod";
 import { defineQuery } from "@orria-labs/runtime";
 
 import { exampleDb } from "../../shared.ts";
 import type { ExampleContext } from "../../shared.ts";
 
-export interface GetUserInput {
-  userId: string;
-}
+const getUserInputSchema = z.object({
+  userId: z.string(),
+});
 
-export interface GetUserOutput {
-  userId: string;
-  email: string | null;
-  loadedFrom: string;
-}
+const getUserOutputSchema = z.object({
+  userId: z.string(),
+  email: z.string().nullable(),
+  loadedFrom: z.string(),
+});
 
-export default defineQuery<GetUserInput, GetUserOutput, ExampleContext>({
-  kind: "query",
+export default defineQuery<ExampleContext>()({
+  input: getUserInputSchema,
+  returns: getUserOutputSchema,
   description: "Reads a user from the example in-memory database",
   handle: ({ ctx, input }) => {
     const user = exampleDb(ctx).users.get(input.userId) ?? null;

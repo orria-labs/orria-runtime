@@ -17,7 +17,7 @@ interface TestBusTypes extends BusTypesContract {
       run: (
         input: { email: string },
         meta?: HandlerInvocationMeta,
-      ) => Promise<string>;
+      ) => Promise<{ email: string; normalized: string }>;
     };
   };
   query: {};
@@ -48,6 +48,29 @@ describe("runtime", () => {
     const logger = createLogger(messages);
     const config = createConfigStore();
     const database = createDatabaseAdapter();
+    const actionInputSchema = createSchema<{ email: string }, { email: string }>((value) => {
+      const input = value as { email: string };
+      return { email: input.email.trim().toLowerCase() };
+    });
+    const actionOutputSchema = createSchema<
+      { email: string },
+      { email: string; normalized: string }
+    >((value) => {
+      const output = value as { email: string };
+      return {
+        email: output.email,
+        normalized: output.email.toLowerCase(),
+      };
+    });
+    const eventPayloadSchema = createSchema<{ email: string }, { email: string }>((value) => {
+      const payload = value as { email: string };
+      return { email: payload.email.trim().toLowerCase() };
+    });
+    const workflowInputSchema = createSchema<{ email: string }, { email: string }>((value) => {
+      const input = value as { email: string };
+      return { email: input.email.trim().toLowerCase() };
+    });
+    const voidSchema = createSchema<void, void>(() => undefined);
 
     const manifest = {
       version: 1,
@@ -58,8 +81,9 @@ describe("runtime", () => {
           kind: "action" as const,
           logicalName: "demo.run",
           modulePath: "memory",
-          declaration: defineAction<{ email: string }, string, TestContext>({
-            kind: "action",
+          declaration: defineAction<TestContext>()({
+            input: actionInputSchema,
+            returns: actionOutputSchema,
             middleware: [
               async ({ key }, next) => {
                 events.push(`handler:before:${key}`);
@@ -71,7 +95,7 @@ describe("runtime", () => {
             handle: async ({ ctx, input }) => {
               events.push(`action:${input.email}`);
               await ctx.event.demo.created({ email: input.email });
-              return input.email;
+              return { email: input.email };
             },
           }),
         },
@@ -80,8 +104,8 @@ describe("runtime", () => {
           kind: "event" as const,
           logicalName: "demo.created",
           modulePath: "memory",
-          declaration: defineEvent<{ email: string }>({
-            kind: "event",
+          declaration: defineEvent({
+            payload: eventPayloadSchema,
             version: 1,
           }),
         },
@@ -90,8 +114,9 @@ describe("runtime", () => {
           kind: "workflow" as const,
           logicalName: "demo.registration",
           modulePath: "memory",
-          declaration: defineWorkflow<{ email: string }, void, TestContext>({
-            kind: "workflow",
+          declaration: defineWorkflow<TestContext>()({
+            input: workflowInputSchema,
+            returns: voidSchema,
             subscribesTo: ["event.demo.created"],
             handle: async ({ ctx, input, meta }) => {
               events.push(`workflow:${input.email}`);
@@ -128,9 +153,19 @@ describe("runtime", () => {
       event: runtime.buses.event,
     };
 
-    const result = await ctx.action.demo.run({ email: "dev@example.com" });
+    const result = await ctx.action.demo.run({ email: " Dev@Example.com " });
+    const actionMethod = runtime.buses.action.demo.run as typeof runtime.buses.action.demo.run & {
+      $key: string;
+      $schema: {
+        input: unknown;
+        returns: unknown;
+      };
+    };
 
-    expect(result).toBe("dev@example.com");
+    expect(result).toEqual({
+      email: "dev@example.com",
+      normalized: "dev@example.com",
+    });
     expect(events).toEqual([
       "global:before:action.demo.run",
       "handler:before:action.demo.run",
@@ -142,8 +177,25 @@ describe("runtime", () => {
       "global:after:action.demo.run",
     ]);
     expect(messages).toHaveLength(1);
+    expect(actionMethod.$key).toBe("action.demo.run");
+    expect(actionMethod.$schema.input).toBe(actionInputSchema);
+    expect(actionMethod.$schema.returns).toBe(actionOutputSchema);
   });
 });
+
+function createSchema<TInput, TOutput>(
+  parse: (value: unknown) => TOutput,
+): {
+  _input: TInput;
+  _output: TOutput;
+  parse(value: unknown): TOutput;
+} {
+  return {
+    _input: undefined as TInput,
+    _output: undefined as TOutput,
+    parse,
+  };
+}
 
 function createConfigStore(): ConfigStore {
   return {

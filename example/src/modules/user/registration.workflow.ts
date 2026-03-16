@@ -1,15 +1,17 @@
+import z from "zod";
 import { defineWorkflow } from "@orria-labs/runtime";
 
 import { exampleDb } from "../../shared.ts";
 import type { ExampleContext } from "../../shared.ts";
 
-interface RegistrationWorkflowInput {
-  userId: string;
-  email: string;
-}
+const registrationWorkflowInputSchema = z.object({
+  userId: z.string(),
+  email: z.email(),
+});
 
-export default defineWorkflow<RegistrationWorkflowInput, void, ExampleContext>({
-  kind: "workflow",
+export default defineWorkflow<ExampleContext>()({
+  input: registrationWorkflowInputSchema,
+  returns: z.void(),
   description: "Handles the local reaction to user.registered",
   subscribesTo: ["event.user.registered"],
   handle: async ({ ctx, input, meta }) => {

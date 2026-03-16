@@ -29,7 +29,7 @@ describe("generateCoreArtifacts", () => {
     const manifestSource = await readFile(path.join(project.rootDir, "src/generated/core/manifest.ts"), "utf8");
 
     expect(busSource).toContain("export interface ActionBusShape");
-    expect(busSource).toContain("create: (input: DeclarationInput<actionUserCreate>");
+    expect(busSource).toContain("create: ExecutableBusMethod<actionUserCreate>");
     expect(busSource).not.toContain(": any");
     expect(manifestSource).toContain('key: "action.user.create"');
     expect(manifestSource).toContain('import actionUserCreate from "../../modules/user/create.action.ts";');
@@ -58,7 +58,6 @@ function declarationModule(kind: "action"): string {
   return `import { defineAction } from "${defineImport}";
 
 export default defineAction<{ email: string }, string>({
-  kind: "action",
   handle: ({ input }) => input.email,
 });
 `;
@@ -70,7 +69,6 @@ function declarationEventModule(): string {
   return `import { defineEvent } from "${defineImport}";
 
 export default defineEvent<{ email: string }>({
-  kind: "event",
   version: 1,
 });
 `;
@@ -82,7 +80,6 @@ function wrongDeclarationModule(): string {
   return `import { defineQuery } from "${defineImport}";
 
 export default defineQuery<{ email: string }, string>({
-  kind: "query",
   handle: ({ input }) => input.email,
 });
 `;

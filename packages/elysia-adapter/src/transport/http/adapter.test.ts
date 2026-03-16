@@ -231,7 +231,6 @@ export default defineWs()({
               logicalName: "user.create",
               modulePath: "memory",
               declaration: defineAction<{ email: string }, { id: string; email: string }, TestContext>({
-                kind: "action",
                 handle: ({ input }) => ({
                   id: `user:${input.email}`,
                   email: input.email,
@@ -244,7 +243,6 @@ export default defineWs()({
               logicalName: "user.get",
               modulePath: "memory",
               declaration: defineQuery<{ userId: string }, { userId: string; loadedFrom: string }, TestContext>({
-                kind: "query",
                 handle: ({ input }) => ({
                   userId: input.userId,
                   loadedFrom: "memory-db",

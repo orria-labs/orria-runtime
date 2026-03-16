@@ -1,9 +1,7 @@
 import type {
+  EventBusMethod,
+  ExecutableBusMethod,
   BusTypesContract,
-  DeclarationInput,
-  DeclarationOutput,
-  DeclarationPayload,
-  HandlerInvocationMeta,
 } from "@orria-labs/runtime";
 type actionUserCreate = typeof import("../../modules/user/create.action.ts").default;
 type eventUserRegistered = typeof import("../../modules/user/registered.event.ts").default;
@@ -12,25 +10,25 @@ type workflowUserRegistration = typeof import("../../modules/user/registration.w
 
 export interface ActionBusShape {
   user: {
-    create: (input: DeclarationInput<actionUserCreate>, meta?: HandlerInvocationMeta) => Promise<DeclarationOutput<actionUserCreate>>;
+    create: ExecutableBusMethod<actionUserCreate>;
   };
 }
 
 export interface QueryBusShape {
   user: {
-    get: (input: DeclarationInput<queryUserGet>, meta?: HandlerInvocationMeta) => Promise<DeclarationOutput<queryUserGet>>;
+    get: ExecutableBusMethod<queryUserGet>;
   };
 }
 
 export interface WorkflowBusShape {
   user: {
-    registration: (input: DeclarationInput<workflowUserRegistration>, meta?: HandlerInvocationMeta) => Promise<DeclarationOutput<workflowUserRegistration>>;
+    registration: ExecutableBusMethod<workflowUserRegistration>;
   };
 }
 
 export interface EventBusShape {
   user: {
-    registered: (payload: DeclarationPayload<eventUserRegistered>, meta?: HandlerInvocationMeta) => Promise<void>;
+    registered: EventBusMethod<eventUserRegistered>;
   };
 }
 

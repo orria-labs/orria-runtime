@@ -138,7 +138,6 @@ export default defineCommand({
               logicalName: "user.create",
               modulePath: "memory",
               declaration: defineAction<{ email: string }, string, TestContext>({
-                kind: "action",
                 handle: ({ input }) => `created:${input.email}`,
               }),
             },

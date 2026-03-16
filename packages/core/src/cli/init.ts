@@ -318,7 +318,6 @@ function renderInfoQuery(): string {
   return `import { defineQuery } from "@orria-labs/runtime";
 
 export default defineQuery<void, { app: unknown; database: string }>({
-  kind: "query",
   handle: ({ ctx }) => ({
     app: ctx.config.get("APP_NAME"),
     database: ctx.database.client().kind,
@@ -331,7 +330,6 @@ function renderHeartbeatWorkflow(): string {
   return `import { defineWorkflow } from "@orria-labs/runtime";
 
 export default defineWorkflow<{ source: string }, { ok: true; source: string }>({
-  kind: "workflow",
   handle: ({ ctx, input }) => {
     // Небольшой наблюдаемый workflow даёт cron transport рабочую цель сразу
     // после scaffold и оставляет понятную точку расширения для orchestration-логики.

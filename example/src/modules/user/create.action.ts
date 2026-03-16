@@ -1,19 +1,21 @@
+import z from "zod";
 import { defineAction } from "@orria-labs/runtime";
 
 import { createUserId, exampleDb } from "../../shared.ts";
 import type { ExampleContext } from "../../shared.ts";
 
-export interface CreateUserInput {
-  email: string;
-}
+const createUserInputSchema = z.object({
+  email: z.email(),
+});
 
-export interface CreateUserOutput {
-  id: string;
-  email: string;
-}
+const createUserOutputSchema = z.object({
+  id: z.string(),
+  email: z.email(),
+});
 
-export default defineAction<CreateUserInput, CreateUserOutput, ExampleContext>({
-  kind: "action",
+export default defineAction<ExampleContext>()({
+  input: createUserInputSchema,
+  returns: createUserOutputSchema,
   description: "Creates a user record and emits user.registered",
   handle: async ({ ctx, input }) => {
     const user = {

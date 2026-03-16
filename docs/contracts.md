@@ -37,8 +37,11 @@ Core discovery сканирует только `src/modules` и использу
 ### Action
 
 ```ts
-export default defineAction<Input, Output>({
-  kind: "action",
+import z from "zod";
+
+export default defineAction({
+  input: z.object({ id: z.string() }),
+  returns: z.object({ ok: z.boolean() }),
   handle: async ({ ctx, input, meta }) => output,
 });
 ```
@@ -46,8 +49,11 @@ export default defineAction<Input, Output>({
 ### Query
 
 ```ts
-export default defineQuery<Input, Output>({
-  kind: "query",
+import z from "zod";
+
+export default defineQuery({
+  input: z.object({ id: z.string() }),
+  returns: z.object({ id: z.string(), title: z.string() }),
   handle: async ({ ctx, input, meta }) => output,
 });
 ```
@@ -55,8 +61,11 @@ export default defineQuery<Input, Output>({
 ### Workflow
 
 ```ts
-export default defineWorkflow<Input, Output>({
-  kind: "workflow",
+import z from "zod";
+
+export default defineWorkflow({
+  input: z.object({ userId: z.string() }),
+  returns: z.void(),
   subscribesTo: ["event.user.registered"],
   handle: async ({ ctx, input, meta }) => output,
 });
@@ -65,8 +74,10 @@ export default defineWorkflow<Input, Output>({
 ### Event
 
 ```ts
-export default defineEvent<Payload>({
-  kind: "event",
+import z from "zod";
+
+export default defineEvent({
+  payload: z.object({ userId: z.string() }),
   version: 1,
 });
 ```
@@ -84,6 +95,17 @@ handler({ ctx, input, meta })
 - `ctx` — application context
 - `input` — уже распарсенный input
 - `meta` — invocation metadata
+
+У bus-метода доступны declaration metadata и schema:
+
+```ts
+const method = app.ctx.action.user.create;
+
+method.$key;
+method.$definition;
+method.$schema.input;
+method.$schema.returns;
+```
 
 ## Generated artifacts
 

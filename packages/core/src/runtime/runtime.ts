@@ -98,7 +98,7 @@ class Runtime<
       throw new Error(`Handler "${key}" is not an event declaration`);
     }
 
-    const parsedPayload = this.#parsePayload(entry, payload);
+    const parsedPayload = await this.#parsePayload(entry, payload);
     const normalizedMeta = { ...meta };
 
     await this.#eventTransport.publish({
@@ -124,7 +124,7 @@ class Runtime<
     meta: HandlerInvocationMeta,
   ): Promise<unknown> {
     const ctx = this.#getContext();
-    const parsedInput = this.#parseInput(entry, input);
+    const parsedInput = await this.#parseInput(entry, input);
     const middleware = [...this.#middleware, ...(entry.declaration.middleware ?? [])];
 
     let index = -1;
@@ -148,16 +148,18 @@ class Runtime<
       );
     };
 
-    return run();
+    const result = await run();
+
+    return this.#parseOutput(entry, result);
   }
 
   #buildExecutableBus(kind: ExecutableKind) {
     const root: Record<string, unknown> = {};
 
     for (const entry of this.#registry.byKind[kind]) {
-      assignPath(root, entry.segments, (input: unknown, meta?: HandlerInvocationMeta) =>
+      assignPath(root, entry.segments, createExecutableBusMethod(entry, (input, meta) =>
         this.invoke(kind, entry.key, input, meta),
-      );
+      ));
     }
 
     return root;
@@ -167,21 +169,81 @@ class Runtime<
     const root: Record<string, unknown> = {};
 
     for (const entry of this.#registry.byKind.event) {
-      assignPath(root, entry.segments, (payload: unknown, meta?: HandlerInvocationMeta) =>
+      assignPath(root, entry.segments, createEventBusMethod(entry, (payload, meta) =>
         this.publish(entry.key, payload, meta),
-      );
+      ));
     }
 
     return root;
   }
 
-  #parseInput(entry: ExecutableRegistryEntry, input: unknown): unknown {
+  async #parseInput(entry: ExecutableRegistryEntry, input: unknown): Promise<unknown> {
+    if (entry.declaration.input) {
+      return parseWithSchema(entry.declaration.input, input);
+    }
+
     return entry.declaration.parser ? entry.declaration.parser(input) : input;
   }
 
-  #parsePayload(entry: EventRegistryEntry, payload: unknown): unknown {
+  async #parseOutput(entry: ExecutableRegistryEntry, output: unknown): Promise<unknown> {
+    if (entry.declaration.returns) {
+      return parseWithSchema(entry.declaration.returns, output);
+    }
+
+    return output;
+  }
+
+  async #parsePayload(entry: EventRegistryEntry, payload: unknown): Promise<unknown> {
+    if (entry.declaration.payload) {
+      return parseWithSchema(entry.declaration.payload, payload);
+    }
+
     return entry.declaration.parser ? entry.declaration.parser(payload) : payload;
   }
+}
+
+function createExecutableBusMethod(
+  entry: ExecutableRegistryEntry,
+  invoke: (input: unknown, meta?: HandlerInvocationMeta) => Promise<unknown>,
+) {
+  const method = (input: unknown, meta?: HandlerInvocationMeta) => invoke(input, meta);
+
+  return Object.assign(method, {
+    $key: entry.key,
+    $kind: entry.kind,
+    $definition: entry.declaration,
+    $schema: {
+      input: entry.declaration.input,
+      returns: entry.declaration.returns,
+    },
+  });
+}
+
+function createEventBusMethod(
+  entry: EventRegistryEntry,
+  publish: (payload: unknown, meta?: HandlerInvocationMeta) => Promise<void>,
+) {
+  const method = (payload: unknown, meta?: HandlerInvocationMeta) => publish(payload, meta);
+
+  return Object.assign(method, {
+    $key: entry.key,
+    $kind: entry.kind,
+    $definition: entry.declaration,
+    $schema: {
+      payload: entry.declaration.payload,
+    },
+  });
+}
+
+async function parseWithSchema(
+  schema: { parse(value: unknown): unknown; parseAsync?(value: unknown): Promise<unknown> },
+  value: unknown,
+): Promise<unknown> {
+  if (typeof schema.parseAsync === "function") {
+    return schema.parseAsync(value);
+  }
+
+  return schema.parse(value);
 }
 
 function assignPath(

@@ -147,13 +147,33 @@ bun run test
 Workflow-подписки объявляются прямо в declaration:
 
 ```ts
-export default defineWorkflow<{ userId: string }, void>({
-  kind: "workflow",
+import z from "zod";
+
+export default defineWorkflow({
+  input: z.object({
+    userId: z.string(),
+  }),
+  returns: z.void(),
   subscribesTo: ["event.user.registered"],
   handle: async ({ ctx, input }) => {
     // orchestration logic
   },
 });
+```
+
+Bus-метод теперь остаётся вызываемым, но ещё и несёт metadata:
+
+```ts
+const createUser = app.ctx.action.user.create;
+
+await createUser({ email: "hello@orria.dev" });
+
+createUser.$key;
+createUser.$schema.input;
+createUser.$schema.returns;
+
+type CreateUserInput = BusMethodInput<typeof createUser>;
+type CreateUserOutput = BusMethodOutput<typeof createUser>;
 ```
 
 ## Документация

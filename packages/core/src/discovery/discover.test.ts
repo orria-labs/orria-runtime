@@ -81,7 +81,6 @@ function declarationModule(
     return `import { defineEvent } from "${defineImport}";
 
 export default defineEvent<{ name: string }>({
-  kind: "event",
   version: 1,
   description: "${name}",
 });
@@ -101,7 +100,6 @@ export default defineEvent<{ name: string }>({
   return `import { ${helperName} } from "${defineImport}";
 
 export default ${helperName}<{ name: string }, string>({
-  kind: "${kind}",
 ${subscribeLine}  description: "${name}",
   handle: ({ input }) => input.name,
 });

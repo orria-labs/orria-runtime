@@ -105,7 +105,6 @@ export const second = defineCron({
             logicalName: "demo.run",
             modulePath: "memory",
             declaration: defineWorkflow<{ source: string }, string, TestContext>({
-              kind: "workflow",
               handle: ({ input, meta }) => {
                 invocations.push({ input, meta });
                 return `done:${input.source}`;
@@ -167,7 +166,6 @@ export const second = defineCron({
               logicalName: "demo.run",
               modulePath: "memory",
               declaration: defineWorkflow<{ source: string }, string, TestContext>({
-                kind: "workflow",
                 handle: ({ input }) => `done:${input.source}`,
               }),
             },
