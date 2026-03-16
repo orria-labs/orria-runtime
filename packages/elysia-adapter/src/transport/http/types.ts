@@ -73,6 +73,12 @@ export interface HttpPluginRegistry {}
 
 export interface HttpDiscoveredAppRegistry {}
 
+export interface HttpPluginCodegenImport {
+  baseDir: string;
+  importPath: string;
+  exportName?: string;
+}
+
 type RegisteredHttpDiscoveredApp = HttpDiscoveredAppRegistry extends {
   app: infer TApp extends AnyElysia;
 }
@@ -138,16 +144,6 @@ type ResolveHttpPluginDefinition<TPluginRef> = TPluginRef extends keyof HttpPlug
   ? HttpPluginRegistry[TPluginRef]
   : TPluginRef;
 
-export type ResolveHttpPluginApp<
-  TPluginRef extends HttpPluginRef<any, any> = HttpPluginRef<any, any>,
-> = ResolveHttpPluginDefinition<TPluginRef> extends {
-  setup: (...args: any[]) => infer TResult;
-}
-  ? Awaited<Exclude<TResult, void>> extends infer TPluginApp extends AnyElysia
-    ? TPluginApp
-    : Elysia
-  : Elysia;
-
 type MergeHttpAppInstances<
   TInstances extends AnyElysia[] = [],
   TSingleton extends SingletonBase = {
@@ -204,10 +200,7 @@ export type ResolveHttpAdapterApp<
   TBuses extends BusTypesContract = BusTypesContract,
   TDatabase extends DatabaseAdapter = DatabaseAdapter,
   TPlugins extends readonly HttpPluginRef<TBuses, TDatabase>[] | undefined = undefined,
-> = MergeHttpAppInstances<[
-  ResolveHttpHandlerApp<TBuses, TDatabase, HttpBaseApp<TBuses, TDatabase>, TPlugins>,
-  RegisteredHttpDiscoveredApp,
-]>;
+> = RegisteredHttpDiscoveredApp;
 
 export type ResolveHttpHandlerApp<
   TBuses extends BusTypesContract = BusTypesContract,
@@ -216,145 +209,6 @@ export type ResolveHttpHandlerApp<
   TPlugins extends readonly HttpPluginRef<TBuses, TDatabase>[] | undefined = undefined,
 > = MergeHttpAppInstances<[TBaseApp, ...ExtractHttpPluginApps<TPlugins>]>;
 
-type ResolveMountedHttpRouteApp<
-  TApp extends AnyElysia,
-  TMethod extends HttpMethod,
-  TPath extends string,
-  THandle,
-  TOptions,
-> = TApp["route"] extends (
-  method: TMethod,
-  path: TPath,
-  handler: THandle,
-  hook?: TOptions,
-) => infer TResult
-  ? TApp["route"] extends (
-      method: TMethod,
-      path: TPath,
-      handler: THandle,
-      hook?: TOptions,
-    ) => infer TMatchedResult
-    ? TMatchedResult extends AnyElysia
-      ? TMatchedResult
-      : Elysia
-    : Elysia
-  : Elysia;
-
-type ResolveMountedHttpWsRouteApp<
-  TApp extends AnyElysia,
-  TPath extends string,
-  TOptions,
-> = TApp["ws"] extends (
-  path: TPath,
-  options: TOptions,
-) => infer TResult
-  ? TApp["ws"] extends (
-      path: TPath,
-      options: TOptions,
-    ) => infer TMatchedResult
-    ? TMatchedResult extends AnyElysia
-      ? TMatchedResult
-      : Elysia
-    : Elysia
-  : Elysia;
-
-export type ResolveHttpRouteApp<
-  TRoute extends HttpHandlerDefinition<any, any, any, any, any, any>,
-> = TRoute extends HttpHandlerDefinition<
-  infer TBuses,
-  infer TDatabase,
-  infer TBaseApp,
-  infer TPath,
-  infer TOptions,
-  infer TPlugins
->
-  ? ResolveMountedHttpRouteApp<
-      ResolveHttpHandlerApp<TBuses, TDatabase, TBaseApp, TPlugins>,
-      NonNullable<TRoute["method"]>,
-      Extract<NonNullable<TPath>, string>,
-      TRoute["handle"],
-      TOptions
-    >
-  : Elysia;
-
-export type ResolveHttpRouteBaseApp<
-  TRoute extends HttpHandlerDefinition<any, any, any, any, any, any>,
-> = TRoute extends HttpHandlerDefinition<
-  infer TBuses,
-  infer TDatabase,
-  infer TBaseApp,
-  any,
-  any,
-  infer TPlugins
->
-  ? ResolveHttpHandlerApp<TBuses, TDatabase, TBaseApp, TPlugins>
-  : Elysia;
-
-export type ResolveDiscoveredHttpRouteApp<
-  TRoute extends HttpHandlerDefinition<any, any, any, any, any, any>,
-  TMethod extends HttpMethod,
-  TPath extends string,
-> = TRoute extends HttpHandlerDefinition<
-  infer TBuses,
-  infer TDatabase,
-  infer TBaseApp,
-  any,
-  infer TOptions,
-  infer TPlugins
->
-  ? ResolveMountedHttpRouteApp<
-      ResolveHttpHandlerApp<TBuses, TDatabase, TBaseApp, TPlugins>,
-      TMethod,
-      TPath,
-      TRoute["handle"],
-      TOptions
-    >
-  : Elysia;
-
-export type ResolveHttpWsRouteApp<
-  TRoute extends HttpWsRouteDefinition<any, any, any, any, any>,
-> = TRoute extends HttpWsRouteDefinition<
-  infer TBuses,
-  infer TDatabase,
-  infer TPath,
-  infer TOptions,
-  infer TPlugins
->
-  ? ResolveMountedHttpWsRouteApp<
-      ResolveHttpHandlerApp<TBuses, TDatabase, HttpBaseApp<TBuses, TDatabase>, TPlugins>,
-      Extract<NonNullable<TPath>, string>,
-      TOptions
-    >
-  : Elysia;
-
-export type ResolveHttpWsRouteBaseApp<
-  TRoute extends HttpWsRouteDefinition<any, any, any, any, any>,
-> = TRoute extends HttpWsRouteDefinition<
-  infer TBuses,
-  infer TDatabase,
-  any,
-  any,
-  infer TPlugins
->
-  ? ResolveHttpHandlerApp<TBuses, TDatabase, HttpBaseApp<TBuses, TDatabase>, TPlugins>
-  : Elysia;
-
-export type ResolveDiscoveredHttpWsRouteApp<
-  TRoute extends HttpWsRouteDefinition<any, any, any, any, any>,
-  TPath extends string,
-> = TRoute extends HttpWsRouteDefinition<
-  infer TBuses,
-  infer TDatabase,
-  any,
-  infer TOptions,
-  infer TPlugins
->
-  ? ResolveMountedHttpWsRouteApp<
-      ResolveHttpHandlerApp<TBuses, TDatabase, HttpBaseApp<TBuses, TDatabase>, TPlugins>,
-      TPath,
-      TOptions
-    >
-  : Elysia;
 
 type ResolveHttpRouteContext<
   TBuses extends BusTypesContract = BusTypesContract,
@@ -446,8 +300,8 @@ export interface BuildHttpApplicationOptions<
   createApp?: (
     adapterContext: CreateApplicationAdapterContext<TBuses, TDatabase>,
   ) => Awaitable<unknown>;
-  plugins?: Array<HttpPluginRef<TBuses, TDatabase>>;
-  routes?: Array<HttpHandlerDefinition<TBuses, TDatabase>>;
+  plugins?: readonly HttpPluginRef<TBuses, TDatabase>[];
+  routes?: readonly HttpHandlerDefinition<TBuses, TDatabase>[];
   extend?(args: {
     app: Elysia;
     ctx: ApplicationContext<TBuses, TDatabase>;

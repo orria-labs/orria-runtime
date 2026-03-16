@@ -115,3 +115,35 @@ export const defineWs = createWsFactory<...>()({ plugins: ["spec"] });
 
 Тогда route modules импортируют `defineHandler` / `defineWs` из `contract.ts`,
 а bootstrap импортирует `httpAdapter` из `adapter.ts`.
+
+Сейчас generated typed app полноценно учитывает:
+- file-based routes
+- file-based ws routes
+- global plugin string refs
+- local/global plugin типы, если они проходят через typed factories route modules
+
+Inline global plugin objects в `defineHttpAdapter({ plugins: [myPlugin] })` монтируются в runtime,
+но их типы не всегда можно автоматически восстановить в generated `app.ts`, если у codegen нет
+стабильной import-ссылки на исходный plugin module.
+
+Для этого есть explicit API:
+
+```ts
+import { defineCodegenPlugin, defineHttpAdapter } from "@orria-labs/runtime-elysia";
+import authPlugin from "./plugins/auth.ts";
+
+const globalPlugins = [
+  defineCodegenPlugin(authPlugin, {
+    baseDir: import.meta.dir,
+    importPath: "./plugins/auth.ts",
+  }),
+] as const;
+
+export const { adapter: httpAdapter } = defineHttpAdapter()({
+  rootDir: path.resolve(import.meta.dir, "../../.."),
+  plugins: globalPlugins,
+});
+```
+
+`defineCodegenPlugin(...)` не добавляет лишних static imports сам по себе.
+Он только прикрепляет metadata, которую codegen использует, если нужно восстановить plugin type в generated `app.ts`.

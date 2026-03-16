@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { createApplication, defineAction, defineQuery } from "@orria-labs/runtime";
+import { createApplication, defineAction, defineQuery, importFreshModule } from "@orria-labs/runtime";
 import type {
   ApplicationContext,
   BusTypesContract,
@@ -382,12 +382,68 @@ export default defineWs()({
         "utf8",
       );
 
-      expect(output).toContain('declare const globalPlugin0: ResolveHttpPluginApp<"request-source">;');
-      expect(output).toContain('declare const routeBase0: ResolveHttpRouteBaseApp<typeof route0>;');
+      expect(output).toContain('declare const globalPlugin0: ResolveGeneratedPluginApp<"request-source">;');
+      expect(output).toContain('declare const routeBase0: ResolveGeneratedRouteBaseApp<typeof route0>;');
       expect(output).toContain('.use(routeBase0.route("GET", "/health",');
       expect(output).toContain('.use(wsRouteBase0.ws("/chat", wsRoute0.options))');
       expect(registryOutput).toContain('interface HttpDiscoveredAppRegistry');
       expect(registryOutput).toContain('app: typeof import("./app.ts").app;');
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it("generates typed app registry for explicit global plugin objects", async () => {
+    const elysiaImport = path
+      .join(import.meta.dir, "..", "..", "index.ts")
+      .split(path.sep)
+      .join("/");
+
+    const project = await createTempProject({
+      "src/transport/http/plugins/request-source.ts": `import { definePlugin } from "${elysiaImport}";
+
+export const requestSourcePlugin = definePlugin({
+  setup: ({ app }) => app.derive(() => ({
+    requestSource: "http",
+  })),
+});
+`,
+      "src/transport/http/router/health.get.ts": `import { defineHandler } from "${elysiaImport}";
+
+export default defineHandler()({
+  handle: ({ requestSource }) => ({ ok: requestSource === "http" }),
+});
+`,
+    });
+
+    try {
+      const pluginFilePath = path.join(
+        project.rootDir,
+        "src/transport/http/plugins/request-source.ts",
+      );
+      const pluginModule = await importFreshModule<Record<string, unknown>>(pluginFilePath);
+      const { defineCodegenPlugin } = await import(path.join(import.meta.dir, "..", "..", "index.ts"));
+      const globalPlugin = defineCodegenPlugin(
+        pluginModule.requestSourcePlugin as Parameters<typeof defineCodegenPlugin>[0],
+        {
+          baseDir: path.dirname(pluginFilePath),
+          importPath: "./request-source.ts",
+          exportName: "requestSourcePlugin",
+        },
+      );
+
+      const result = await generateHttpAppRegistryArtifacts({
+        rootDir: project.rootDir,
+        globalPlugins: [globalPlugin],
+      });
+      const output = await readFile(
+        path.join(project.rootDir, result.outFile),
+        "utf8",
+      );
+
+      expect(output).toContain('import { requestSourcePlugin as globalPluginModule0 } from "../../transport/http/plugins/request-source.ts";');
+      expect(output).toContain('declare const globalPlugin0: ResolveGeneratedPluginApp<typeof globalPluginModule0>;');
+      expect(output).toContain('.use(globalPlugin0)');
     } finally {
       await project.cleanup();
     }

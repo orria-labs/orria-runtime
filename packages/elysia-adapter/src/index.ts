@@ -12,6 +12,7 @@ export {
   validateHttpRoutes,
 } from "./transport/http/discovery.ts";
 export { definePlugin } from "./transport/http/plugins/index.ts";
+export { defineCodegenPlugin } from "./transport/http/plugins/index.ts";
 export { createHandlerFactory, createWsFactory, defineHandler, defineHttpRoute, defineWebsocket, defineWs } from "./transport/http/router/index.ts";
 export type {
   BuildHttpApplicationOptions,
@@ -26,15 +27,8 @@ export type {
   HttpHandlerDefinition,
   HttpMethod,
   HttpPluginRegistry,
-  ResolveDiscoveredHttpRouteApp,
-  ResolveDiscoveredHttpWsRouteApp,
-  ResolveHttpPluginApp,
-  ResolveHttpRouteApp,
-  ResolveHttpRouteBaseApp,
   HttpRouteDetail,
   HttpRouteOptions,
-  ResolveHttpWsRouteApp,
-  ResolveHttpWsRouteBaseApp,
   HttpWsRouteDefinition,
   HttpWsRouteOptions,
   HttpPluginDefinition,

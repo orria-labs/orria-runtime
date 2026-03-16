@@ -1,4 +1,4 @@
-import { defineHandler } from "../adapter.ts";
+import { defineHandler } from "../contract.ts";
 
 export default defineHandler({
   handle: ({ ctx }) => ({

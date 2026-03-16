@@ -114,6 +114,19 @@ export function createHttpAdapter<
       type AdapterApp = ResolveHttpAdapterApp<TBuses, TDatabase, TPlugins>;
 
       let app = await buildHttpApplication(adapterContext, options) as unknown as AdapterApp;
+
+      if (options.rootDir) {
+        await generateHttpAppRegistryArtifacts({
+          rootDir: options.rootDir,
+          routesDir: options.routesDir,
+          globalPlugins: options.plugins,
+        });
+        await generateHttpPluginRegistryArtifacts({
+          rootDir: options.rootDir,
+          pluginsDir: options.pluginsDir,
+        });
+      }
+
       let listeningApp: { stop?: () => unknown } | undefined;
       let listeningArgs: Parameters<Elysia["listen"]> | undefined;
       let watcher = createHttpWatcher(options, adapterContext, async () => {

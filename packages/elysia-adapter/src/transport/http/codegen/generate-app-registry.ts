@@ -6,13 +6,14 @@ import {
   discoverHttpWsRouteModules,
 } from "../discovery.ts";
 import type { HttpPluginRef } from "../types.ts";
+import { getHttpPluginCodegenImport } from "../plugins/shared.ts";
 
 export interface GenerateHttpAppRegistryOptions {
   rootDir?: string;
   routesDir?: string;
   outFile?: string;
   registryOutFile?: string;
-  globalPlugins?: Array<string | HttpPluginRef>;
+  globalPlugins?: readonly (string | HttpPluginRef)[];
 }
 
 export async function generateHttpAppRegistryArtifacts(
@@ -38,6 +39,7 @@ export async function generateHttpAppRegistryArtifacts(
   await writeFile(
     absoluteOutFile,
     renderHttpAppFile({
+      rootDir,
       outFile: absoluteOutFile,
       routes,
       wsRoutes,
@@ -62,14 +64,32 @@ export async function generateHttpAppRegistryArtifacts(
 }
 
 function renderHttpAppFile(args: {
+  rootDir: string;
   outFile: string;
   routes: Awaited<ReturnType<typeof discoverHttpRouteModules>>;
   wsRoutes: Awaited<ReturnType<typeof discoverHttpWsRouteModules>>;
-  globalPlugins?: Array<string | HttpPluginRef>;
+  globalPlugins?: readonly (string | HttpPluginRef)[];
 }): string {
   const imports = [
     `import { Elysia } from "elysia";`,
-    `import type { HttpHandlerDefinition, HttpMethod, ResolveHttpPluginApp, ResolveHttpRouteBaseApp, ResolveHttpWsRouteBaseApp } from "@orria-labs/runtime-elysia";`,
+    `import type { HttpBaseApp, HttpHandlerDefinition, HttpMethod, HttpPluginRegistry, HttpWsRouteDefinition, ResolveHttpHandlerApp } from "@orria-labs/runtime-elysia";`,
+    ...(args.globalPlugins ?? []).flatMap((pluginRef, index) => {
+      if (typeof pluginRef === "string") {
+        return [];
+      }
+
+      const metadata = getHttpPluginCodegenImport(pluginRef);
+      if (!metadata) {
+        return [];
+      }
+
+      const importPath = relativeImport(
+        args.outFile,
+        resolveCodegenImportFilePath(metadata, args.rootDir),
+      );
+
+      return [renderPluginImport(`globalPluginModule${index}`, importPath, metadata.exportName)];
+    }),
     ...args.routes.map((entry, index) =>
       `import route${index} from ${JSON.stringify(relativeImport(args.outFile, entry.filePath))};`
     ),
@@ -79,15 +99,36 @@ function renderHttpAppFile(args: {
   ];
 
   const pluginDecls = (args.globalPlugins ?? [])
-    .map((pluginRef, index) => typeof pluginRef === "string"
-      ? `declare const globalPlugin${index}: ResolveHttpPluginApp<${JSON.stringify(pluginRef)}>;`
-      : undefined)
+    .map((pluginRef, index) => {
+      if (typeof pluginRef === "string") {
+        return `declare const globalPlugin${index}: ResolveGeneratedPluginApp<${JSON.stringify(pluginRef)}>;`;
+      }
+
+      const metadata = getHttpPluginCodegenImport(pluginRef);
+      if (!metadata) {
+        return undefined;
+      }
+
+      return `declare const globalPlugin${index}: ResolveGeneratedPluginApp<typeof globalPluginModule${index}>;`;
+    })
     .filter(Boolean);
 
   const handlerHelperDecls = args.routes.length > 0
     ? [
+      `type ResolveGeneratedPluginDefinition<TPluginRef> = TPluginRef extends keyof HttpPluginRegistry ? HttpPluginRegistry[TPluginRef] : TPluginRef;`,
+      `type ResolveGeneratedPluginApp<TPluginRef> = ResolveGeneratedPluginDefinition<TPluginRef> extends {`,
+      `  setup: (...args: any[]) => infer TResult;`,
+      `} ? Awaited<Exclude<TResult, void>> : Elysia;`,
+      `type ResolveGeneratedRouteBaseApp<TRoute extends HttpHandlerDefinition<any, any, any, any, any, any>> =`,
+      `  TRoute extends HttpHandlerDefinition<infer TBuses, infer TDatabase, infer TBaseApp, any, any, infer TPlugins>`,
+      `    ? ResolveHttpHandlerApp<TBuses, TDatabase, TBaseApp, TPlugins>`,
+      `    : Elysia;`,
+      `type ResolveGeneratedWsRouteBaseApp<TRoute extends HttpWsRouteDefinition<any, any, any, any, any>> =`,
+      `  TRoute extends HttpWsRouteDefinition<infer TBuses, infer TDatabase, any, any, infer TPlugins>`,
+      `    ? ResolveHttpHandlerApp<TBuses, TDatabase, HttpBaseApp<TBuses, TDatabase>, TPlugins>`,
+      `    : Elysia;`,
       `type ResolveGeneratedRouteHandler<TRoute extends HttpHandlerDefinition<any, any, any, any, any, any>, TMethod extends HttpMethod, TPath extends string> =`,
-      `  ResolveHttpRouteBaseApp<TRoute>["route"] extends (`,
+      `  ResolveGeneratedRouteBaseApp<TRoute>["route"] extends (`,
       `    method: TMethod,`,
       `    path: TPath,`,
       `    handler: infer THandler,`,
@@ -100,7 +141,7 @@ function renderHttpAppFile(args: {
     : [];
 
   const routeDecls = args.routes.map(
-    (_entry, index) => `declare const routeBase${index}: ResolveHttpRouteBaseApp<typeof route${index}>;`,
+    (_entry, index) => `declare const routeBase${index}: ResolveGeneratedRouteBaseApp<typeof route${index}>;`,
   );
 
   const wsDecls = args.wsRoutes.map((entry, index) => {
@@ -108,13 +149,22 @@ function renderHttpAppFile(args: {
       return undefined;
     }
 
-    return `declare const wsRouteBase${index}: ResolveHttpWsRouteBaseApp<typeof wsRoute${index}>;`;
+    return `declare const wsRouteBase${index}: ResolveGeneratedWsRouteBaseApp<typeof wsRoute${index}>;`;
   }).filter(Boolean);
 
   const pluginLines = (args.globalPlugins ?? [])
-    .map((pluginRef, index) => typeof pluginRef === "string"
-      ? `  .use(globalPlugin${index})`
-      : undefined)
+    .map((pluginRef, index) => {
+      if (typeof pluginRef === "string") {
+        return `  .use(globalPlugin${index})`;
+      }
+
+      const metadata = getHttpPluginCodegenImport(pluginRef);
+      if (!metadata) {
+        return undefined;
+      }
+
+      return `  .use(globalPlugin${index})`;
+    })
     .filter(Boolean);
 
   const routeLines = args.routes.map(
@@ -162,4 +212,34 @@ function relativeImport(outFile: string, targetFilePath: string): string {
   const relativePath = path.relative(fromDir, targetFilePath).split(path.sep).join("/");
 
   return relativePath.startsWith(".") ? relativePath : `./${relativePath}`;
+}
+
+function resolveCodegenImportFilePath(
+  metadata: {
+    baseDir: string;
+    importPath: string;
+  },
+  rootDir: string,
+): string {
+  if (path.isAbsolute(metadata.importPath)) {
+    return metadata.importPath;
+  }
+
+  if (metadata.importPath.startsWith(".")) {
+    return path.resolve(metadata.baseDir, metadata.importPath);
+  }
+
+  return path.resolve(rootDir, metadata.importPath);
+}
+
+function renderPluginImport(
+  localName: string,
+  importPath: string,
+  exportName?: string,
+): string {
+  if (!exportName || exportName === "default") {
+    return `import ${localName} from ${JSON.stringify(importPath)};`;
+  }
+
+  return `import { ${exportName} as ${localName} } from ${JSON.stringify(importPath)};`;
 }

@@ -5,7 +5,6 @@ import type { GeneratedBusTypes } from "../../generated/core/index.ts";
 
 export const {
   adapter: httpAdapter,
-  defineHandler,
 } = defineHttpAdapter<GeneratedBusTypes, ExampleDatabaseAdapter>()({
   rootDir: path.resolve(import.meta.dir, "../../.."),
   plugins: ["spec"],
