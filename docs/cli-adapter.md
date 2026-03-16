@@ -1,247 +1,125 @@
-# CLI adapter (`@orria-labs/runtime-citty`)
+# CLI adapter
 
-`@orria-labs/runtime-citty` — transport adapter для CLI поверх `citty`.
+Документ описывает текущее состояние `@orria-labs/runtime-citty`.
 
-Он нужен, чтобы:
+## Основные API
 
-- собирать file-based CLI commands из приложения;
-- вызывать runtime buses из CLI-команд;
-- запускать CLI как из `process.argv`, так и программно в тестах.
+- `createCliAdapter(...)`
+- `defineCommand(...)`
+- `discoverCliCommands(...)`
+- `discoverCliCommandModules(...)`
+- `generateCliCommandRegistryArtifacts(...)`
 
-## Когда использовать
-
-Подходит для задач вроде:
-
-- `seed`, `migrate`, `sync`, `backfill`;
-- локальных admin/debug commands;
-- workflow/action запусков из терминала;
-- internal tooling рядом с runtime-приложением.
-
-## Bootstrap
-
-```ts
-import { createApplication } from "@orria-labs/runtime";
-import { createCliAdapter } from "@orria-labs/runtime-citty";
-
-const app = await createApplication(options, {
-  cli: createCliAdapter({
-    rootDir: import.meta.dir,
-  }),
-});
-
-await app.adapter.cli.run(process.argv.slice(2));
-```
-
-## Что возвращает `app.adapter.cli`
-
-```ts
-app.adapter.cli.command
-app.adapter.cli.run(rawArgs?)
-app.adapter.cli.invoke(rawArgs?)
-app.adapter.cli.renderUsage()
-```
-
-- `command` — root `citty` command object.
-- `run(rawArgs?)` — полноценный CLI execution path для реального запуска.
-- `invoke(rawArgs?)` — программный вызов с возвратом результата leaf-команды.
-- `renderUsage()` — генерирует help/usage как строку.
-
-## `createCliAdapter(options)`
-
-```ts
-createCliAdapter({
-  rootDir,
-  commandsDir,
-  meta,
-  name,
-  args,
-  commands,
-  setup,
-  cleanup,
-  run,
-})
-```
-
-### Поля `options`
-
-- `rootDir` — корень приложения для file-based discovery.
-- `commandsDir` — кастомная директория commands; по умолчанию `src/transport/cli/command`.
-- `meta` — root CLI metadata: `name`, `version`, `description`, `hidden`, `aliases`.
-- `name` — shortcut для root command name.
-- `args` — root-level args.
-- `commands` — commands, добавленные вручную поверх discovered commands.
-- `setup` — root setup hook.
-- `cleanup` — root cleanup hook.
-- `run` — root command handler.
-
-Если `rootDir` задан, adapter также пытается взять `name`, `version`, `description` из `package.json`.
-
-## File-based discovery
-
-По умолчанию adapter сканирует:
+## Рекомендуемая структура
 
 ```txt
-src/transport/cli/command/**/*.ts
+src/transport/cli/
+├── adapter.ts
+└── command/
+    ├── system/
+    │   └── info.ts
+    └── user/
+        └── create.ts
 ```
 
-Каждый файл должен экспортировать `defineCommand(...)`.
-
-## Как строится tree commands из файлов
-
-Командный путь строится из относительного пути файла:
-
-- `src/transport/cli/command/user/create.ts` -> `user create`
-- `src/transport/cli/command/system/info.ts` -> `system info`
-- `src/transport/cli/command/cache/index.ts` -> `cache`
-
-Имя сегмента нормализуется в kebab-case.
-
-### Переопределение path
-
-Если нужно, путь можно задать явно:
+## Adapter
 
 ```ts
-defineCommand({
-  path: ["user", "create"],
-  run: () => {},
+import path from "node:path";
+import { createCliAdapter } from "@orria-labs/runtime-citty";
+
+export const cliAdapter = createCliAdapter({
+  rootDir: path.resolve(import.meta.dir, "../../.."),
 });
 ```
 
-или
+Кроме file-based discovery, adapter умеет и программное описание root command:
 
-```ts
-defineCommand({
-  path: "user/create",
-  run: () => {},
-});
-```
+- `name`
+- `meta`
+- `args`
+- `commands`
+- `setup`
+- `cleanup`
+- `run`
 
-## `defineCommand()`
+## Команда
 
 ```ts
 import { defineCommand } from "@orria-labs/runtime-citty";
 
 export default defineCommand({
   aliases: ["new"],
-  meta: {
-    description: "Create user",
-  },
   args: {
     email: {
       type: "string",
       required: true,
-      description: "User email",
     },
   },
   run: ({ ctx, args }) => ctx.action.user.create({ email: args.email }),
 });
 ```
 
-### Поля command
+Контекст command получает:
 
-- `name` — имя текущего command node.
-- `path` — явный путь команды.
-- `aliases` — alias names для текущего node.
-- `meta` — metadata для help/usage.
-- `args` — args schema в формате `citty`.
-- `subCommands` — вложенные commands, если вы собираете tree вручную.
-- `setup` — hook перед `run`.
-- `cleanup` — hook после `run`.
-- `run` — основной handler.
+- `ctx`
+- `adapterContext`
+- `command`
+- `commandPath`
+- обычный `citty` context
 
-### Поля `meta`
+## Как выводится путь команды
 
-- `name` — имя команды в usage/help.
-- `version` — версия CLI.
-- `description` — описание команды.
-- `hidden` — скрыть command из help.
-- `aliases` — альтернативные имена.
+### Из файла
 
-## Контекст handler-а
+- `command/system/info.ts` → `system info`
+- `command/user/create.ts` → `user create`
+- `index.ts` отбрасывается как последний сегмент
 
-Каждый `setup` / `run` / `cleanup` получает расширенный контекст:
+### Явно
 
-```ts
-{
-  rawArgs,
-  args,
-  cmd,
-  subCommand,
-  data,
-  ctx,
-  adapterContext,
-  command,
-  commandPath,
-}
-```
+Путь можно задать через:
 
-### Что означает каждое поле
+- `path: "system/info"`
+- `path: ["system", "info"]`
+- `name`, если в нём есть `/`
 
-- `rawArgs` — исходные CLI args.
-- `args` — распарсенные args от `citty`.
-- `cmd` — текущий resolved `citty` command.
-- `subCommand` — дочерний command, если он был выбран.
-- `data` — произвольные данные `citty`, если используются.
-- `ctx` — application context.
-- `adapterContext` — `ctx`, `registry`, `runtime`, `manifest`, `console`.
-- `command` — исходная `defineCommand()` декларация.
-- `commandPath` — путь команды массивом сегментов, например `['user', 'create']`.
+Aliases задаются через `aliases` или `meta.aliases`.
 
-## `run()` vs `invoke()`
-
-- `run()` используйте в реальном entrypoint приложения.
-- `invoke()` используйте в тестах, automation и internal programmatic scenarios.
-
-Пример:
+## Programmatic API
 
 ```ts
+await app.adapter.cli.run(["user", "create", "--email", "demo@example.com"]);
+
 const result = await app.adapter.cli.invoke([
   "user",
   "new",
   "--email",
-  "dev@example.com",
+  "alias@example.com",
 ]);
+
+const usage = await app.adapter.cli.renderUsage();
 ```
 
-## Aliases
+## Codegen
 
-Alias добавляются на уровень конкретной команды:
+`orria-runtime generate` создаёт `src/generated/cli/command-registry.d.ts`.
 
-```ts
-defineCommand({
-  aliases: ["new"],
-  run: ({ ctx, args }) => ctx.action.user.create({ email: args.email }),
-});
-```
+Эта декларация расширяет:
 
-Если команда лежит в `user/create.ts`, она будет доступна и как:
+- `CliCommandRegistry`
+- `CliCommandAliasRegistry`
 
-- `user create`
-- `user new`
+В результате `run(...)` и `invoke(...)` получают типизацию по discovered command paths.
 
-## Рекомендуемая структура
+## Dev-flow
 
-```txt
-src/
-└── transport/
-    └── cli/
-        ├── adapter.ts
-        └── command/
-            ├── system/
-            │   └── info.ts
-            └── user/
-                └── create.ts
-```
+Adapter поддерживает:
 
-## Практический паттерн
+- `reload()`
+- `watch()`
+- `unwatch()`
 
-- command отвечает за parsing args и orchestration внешнего вызова;
-- бизнес-логика остаётся в `action` / `workflow` / `query`;
-- `invoke()` покрывает testability без запуска процесса;
-- file-based tree делает CLI масштабируемым так же, как router в HTTP.
+Watch отслеживает tree команд через общий polling watcher и пересобирает command tree после изменений файлов.
 
-## Known limitations
-
-- file-based commands поддерживают `reload()/watch()/unwatch()`;
-- `orria-runtime generate` автоматически создаёт `src/generated/cli/command-registry.d.ts`, а literal-вызовы `run()/invoke()` получают compile-time safety по command paths и aliases;
-- подтверждённый backlog ведётся в `docs/TECH_DEBT.md#cli-adapter`.
+После рефакторинга reload/watch path теперь централизован внутри adapter, что упрощает поддержку и снижает когнитивную нагрузку при доработках.

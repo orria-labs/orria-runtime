@@ -1,57 +1,93 @@
 # `@orria-labs/runtime-croner`
 
-Cron transport adapter для `@orria-labs/runtime` поверх `croner`.
+Cron adapter для `@orria-labs/runtime` поверх `croner`.
 
-- npm: https://www.npmjs.com/package/@orria-labs/runtime-croner
+- npm: `https://www.npmjs.com/package/@orria-labs/runtime-croner`
 
 ## Что поддерживается
 
-- `createCronAdapter({ rootDir })` для file-based discovery schedules
-- `discoverCronSchedules()` / `discoverCronScheduleModules()` для явного discovery
-- `defineCron()` для декларации jobs
-- `workflowRef()` / `workflowTarget()` для typed workflow targets
-- generated typed registry для schedule names
-- `app.adapter.cron.start()` / `stop()` / `reload()` / `watch()` / `unwatch()` / `trigger(name)`
-- execution observability через `job.lastExecution` и `job.nextRunAt`
+- file-based discovery schedules из `src/transport/cron/schedules`
+- `defineCron(...)`
+- workflow targets через string key, `workflowRef(...)` и `workflowTarget(...)`
+- `start()`, `stop()`, `reload()`, `watch()`, `unwatch()`
+- `trigger(name)` с типизацией discovered schedule names
+- execution metadata и состояние последних запусков
 
-## Базовое использование
+## Базовый adapter
 
 ```ts
-const app = await createApplication(options, {
-  cron: createCronAdapter({
-    rootDir: import.meta.dir,
-  }),
-});
+import path from "node:path";
+import { createCronAdapter } from "@orria-labs/runtime-croner";
 
-await app.adapter.cron.start();
+export const cronAdapter = createCronAdapter({
+  rootDir: path.resolve(import.meta.dir, "../../.."),
+});
 ```
 
+## Schedule
+
 ```ts
+import { defineCron, workflowTarget } from "@orria-labs/runtime-croner";
+
 export default defineCron<GeneratedBusTypes>({
-  name: "billing.retry-failed-payments",
-  schedule: "*/5 * * * *",
+  name: "user.replay-registration",
+  schedule: "0 * * * *",
   target: workflowTarget<GeneratedBusTypes>(
-    "workflow.billing.retryFailedPayments",
-    () => ({ retryAll: true }),
+    "workflow.user.registration",
+    () => ({
+      userId: "scheduled_user",
+      email: "cron@example.com",
+    }),
   ),
   options: {
     timezone: "UTC",
-    protect: true,
+    paused: true,
   },
 });
 ```
 
-## Целевая структура
+## Target-варианты
 
-```txt
-src/transport/cron/
-├── adapter.ts
-└── schedules/
+`target` может быть:
+
+- функцией `(executionContext) => ...`
+- string workflow key, например `"workflow.user.registration"`
+- `workflowRef(...)`
+- `workflowTarget(...)`
+
+В workflow adapter автоматически прокидывает meta:
+
+- `source: "cron:<schedule-name>"`
+- `cronName`
+- `cronSource`
+- `cronRunId`
+- `cronTriggeredAt`
+
+## Runtime API
+
+```ts
+await app.adapter.cron.start();
+await app.adapter.cron.trigger("user.replay-registration");
+
+app.adapter.cron.jobs["user.replay-registration"].lastExecution;
 ```
 
-## Known limitations
+Каждый `job controller` даёт:
 
-- Cron adapter уже покрывает generated schedule registry и file-watch auto-reload.
-- Подтверждённый remaining backlog теперь описан в `../../docs/TECH_DEBT.md#core`.
+- `name`
+- `schedule`
+- `running`
+- `nextRunAt`
+- `lastExecution`
+- `stop()`
+- `trigger(source?)`
 
-Общий план развития лежит в `../../docs/ROADMAP.md`.
+## Codegen
+
+После `orria-runtime generate` adapter пишет `src/generated/cron/schedule-registry.d.ts`, поэтому `trigger(name)` и связанные literal names получают типизацию.
+
+## Dev-режим
+
+Adapter поддерживает `reload()`, `watch()` и `unwatch()`. При reload пересобирается список schedules, валидируются workflow targets и при необходимости заново поднимаются runtime jobs.
+
+Подробнее — `../../docs/cron-adapter.md`.

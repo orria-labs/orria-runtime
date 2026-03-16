@@ -1,80 +1,95 @@
 # Release и публикация
 
-Этот документ описывает publish-ready flow для `Orria Runtime` пакетов.
+Этот документ описывает текущий publish-ready flow workspace.
 
-## Что делает сборка
+## Что делает сборка пакета
 
-Перед публикацией каждый пакет собирается в минимальный `dist`-bundle:
+Каждый пакет собирается в отдельный `dist` через `scripts/build-package.ts`.
 
-- `index.js` — runtime bundle в ESM;
-- `index.d.ts` — декларации типов;
-- `cli/main.js` — только для `@orria-labs/runtime` и CLI `orria-runtime`.
+В `dist` попадают:
 
-В `dist/package.json` автоматически подготавливаются publish-ready поля:
+- `index.js`
+- `index.d.ts`
+- `README.md`
+- `package.json`, переписанный под публикацию
 
-- `exports` на `./index.js` и `./index.d.ts`;
-- `bin` для `orria-runtime`;
-- внутренние `workspace:*` зависимости заменяются на реальные release-версии.
+Для `@orria-labs/runtime` дополнительно собирается:
 
-## Основные команды
+- `cli/main.js`
+- `cli/main.d.ts`
+
+## Что переписывается в `dist/package.json`
+
+- `exports`
+- `main`
+- `module`
+- `types`
+- `bin` для `orria-runtime`
+- `workspace:*` зависимости на реальные версии workspace-пакетов
+
+## Команды workspace
 
 ```bash
 bun run build
+bun run typecheck
+bun run test
 bun run release:check
-bun run changeset
-bun run release:version
 bun run release:dry-run
 bun run release:publish
 ```
 
 ## Рекомендуемый flow релиза
 
-1. Создать changeset:
+1. создать changeset
 
 ```bash
 bun run changeset
 ```
 
-2. Поднять версии пакетов на основе changesets:
+2. обновить версии пакетов
 
 ```bash
 bun run release:version
 ```
 
-3. Проверить релиз локально:
+3. проверить релиз локально
 
 ```bash
 bun run release:check
 bun run release:dry-run
 ```
 
-4. Опубликовать пакеты в `npm`:
+4. опубликовать
 
 ```bash
 bun run release:publish
 ```
 
-## Полезные варианты
-
-Опубликовать pre-release tag:
+## Полезные флаги publish
 
 ```bash
 bun run release:publish -- --tag next
-```
-
-Передать OTP для `npm`:
-
-```bash
 bun run release:publish -- --otp 123456
 ```
 
 ## Порядок публикации
 
-Пакеты публикуются в фиксированном порядке:
+Сейчас publish идёт в фиксированном порядке:
 
 1. `@orria-labs/runtime`
 2. `@orria-labs/runtime-elysia`
 3. `@orria-labs/runtime-citty`
 4. `@orria-labs/runtime-croner`
 
-Если какая-то версия уже есть в `npm`, publish-скрипт пропускает её и продолжает дальше.
+Если конкретная версия уже опубликована в npm, publish-скрипт безопасно пропускает её. Это позволяет повторно запускать релиз после частичного сбоя.
+
+## Что проверяет `release:check`
+
+```bash
+bun run generate:example
+bun run typecheck
+bun run test
+bun run build
+```
+
+То есть release-контур опирается не только на сборку пакетов, но и на актуальность generated артефактов в `example`.

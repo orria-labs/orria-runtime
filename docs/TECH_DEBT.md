@@ -1,26 +1,32 @@
 # Tech Debt
 
-Этот файл содержит только подтверждённые техдолги и нереализованные части, которые реально найдены в текущем коде.
+Этот файл содержит только подтверждённый техдолг, который прямо следует из текущего кода и архитектуры.
 
-Правила списка:
+## Текущее состояние
 
-- сюда не попадают абстрактные «можно было бы сделать лучше» идеи без подтверждения в коде;
-- каждый пункт либо уже упомянут в проектной документации, либо напрямую подтверждается текущими типами/API;
-- приоритет — ориентир для дальнейшего разбора, а не окончательное решение.
+На данный момент в кодовой базе закрыты:
 
-## Status
+- core runtime flow
+- generated manifest и typed bus
+- adapter codegen contract
+- HTTP/CLI/cron adapters
+- watch/reload flow adapters
+- release pipeline
+- оптимизации polling watcher, discovery и runtime-path для уменьшения лишней работы и когнитивной нагрузки
 
-- В текущей итерации закрыты `orria-runtime init`, общий adapter codegen contract, typed HTTP global plugins, typed CLI/Cron registries и `watch()/reload()` для transport adapters.
-- На данный момент подтверждённый техдолг в кодовой базе сведён к одному runtime-пункту ниже.
+## Подтверждённый remaining debt
 
-## Core
+### Core
 
-### Low
+- Отсутствует durable queue / outbox слой. Сейчас события могут публиковаться через `eventTransport`, а локальные workflow subscriptions уже работают, но отдельной outbox-подсистемы с гарантированной доставкой и persistence нет.
 
-- В core по-прежнему нет durable queue / outbox слоя. Это уже отражено в общих контрактах и остаётся частью будущего scope. Подтверждение: `docs/contracts.md` и отсутствие соответствующей runtime-подсистемы в `packages/core/src`.
+## Что не считается техдолгом сейчас
 
-## Notes
+- наличие polling watcher — это осознанная реализация для стабильного file-based dev-flow под Bun/Node
+- наличие generated артефактов в `src/generated/*` — это часть публичного build-time контракта
+- разделение `adapter.ts` и `contract.ts` в HTTP-примере — это intentional pattern, а не обходной манёвр
 
-- Пункты выше не означают, что проект нестабилен: текущее состояние закрывает runtime flow, scaffolding, shared adapter codegen, HTTP/CLI/cron adapters и example.
-- Подготовка пакетов к публикации в `npm` и GitHub ведётся отдельно в `docs/ROADMAP.md` как следующий этап после закрытия подтверждённого техдолга, а не как defect текущего runtime.
-- Этот файл — рабочий backlog для дальнейшей приоритизации и по мере реализации должен обновляться вместе с кодом и README.
+## Связанные документы
+
+- `docs/ROADMAP.md` — куда проект движется дальше
+- `docs/contracts.md` — какой контракт уже считается стабильным

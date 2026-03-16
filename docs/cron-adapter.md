@@ -1,217 +1,97 @@
-# Cron adapter (`@orria-labs/runtime-croner`)
+# Cron adapter
 
-`@orria-labs/runtime-croner` — transport adapter для cron/scheduler execution поверх `croner`.
+Документ описывает текущее состояние `@orria-labs/runtime-croner`.
 
-Он нужен, чтобы:
+## Основные API
 
-- собирать schedules из файловой структуры;
-- запускать workflows по cron-правилам;
-- вручную триггерить jobs в тестах и maintenance-сценариях;
-- иметь lifecycle `start()` / `stop()` / `reload()` и execution metadata.
+- `createCronAdapter(...)`
+- `defineCron(...)`
+- `workflowRef(...)`
+- `workflowTarget(...)`
+- `discoverCronSchedules(...)`
+- `discoverCronScheduleModules(...)`
+- `generateCronScheduleRegistryArtifacts(...)`
 
-## Когда использовать
-
-Подходит для:
-
-- периодических reconciliation jobs;
-- retries / backfills / cleanup tasks;
-- scheduled workflows;
-- dev/test-trigger без поднятия внешнего scheduler.
-
-## Bootstrap
-
-```ts
-import { createApplication } from "@orria-labs/runtime";
-import { createCronAdapter } from "@orria-labs/runtime-croner";
-
-const app = await createApplication(options, {
-  cron: createCronAdapter({
-    rootDir: import.meta.dir,
-  }),
-});
-
-await app.adapter.cron.start();
-```
-
-## Что возвращает `app.adapter.cron`
-
-```ts
-app.adapter.cron.started
-app.adapter.cron.jobs
-app.adapter.cron.start()
-app.adapter.cron.stop()
-app.adapter.cron.reload()
-app.adapter.cron.trigger(name)
-app.adapter.cron.watch()
-app.adapter.cron.unwatch()
-```
-
-- `started` — запущен ли scheduler сейчас.
-- `jobs` — registry jobs controllers.
-- `start()` — discover + bootstrapping Croner jobs.
-- `stop()` — остановка всех runtime jobs.
-- `reload()` — повторный discovery schedules и пересборка scheduler.
-- `trigger(name)` — ручной запуск job по имени, типизированный через generated schedule registry.
-
-## `createCronAdapter(options)`
-
-```ts
-createCronAdapter({
-  rootDir,
-  schedulesDir,
-  schedules,
-})
-```
-
-### Поля `options`
-
-- `rootDir` — корень приложения для file-based discovery.
-- `schedulesDir` — кастомная директория schedules; по умолчанию `src/transport/cron/schedules`.
-- `schedules` — schedules, добавленные вручную поверх discovered schedules.
-
-## File-based discovery
-
-По умолчанию adapter сканирует:
+## Рекомендуемая структура
 
 ```txt
-src/transport/cron/schedules/**/*.ts
+src/transport/cron/
+├── adapter.ts
+└── schedules/
+    └── replay-registration.ts
 ```
 
-Каждый файл должен экспортировать `defineCron(...)`.
+## Adapter
 
-Adapter валидирует:
+```ts
+import path from "node:path";
+import { createCronAdapter } from "@orria-labs/runtime-croner";
 
-- schedule name не пустой;
-- cron expression не пустой;
-- имена schedules уникальны;
-- string/ref targets указывают на существующие workflows в runtime registry.
+export const cronAdapter = createCronAdapter({
+  rootDir: path.resolve(import.meta.dir, "../../.."),
+});
+```
 
-## `defineCron()`
+## Schedule
 
 ```ts
 import { defineCron, workflowTarget } from "@orria-labs/runtime-croner";
 
-export default defineCron({
-  name: "billing.retry-failed-payments",
-  schedule: "*/5 * * * *",
-  target: workflowTarget("workflow.billing.retryFailedPayments"),
+export default defineCron<GeneratedBusTypes>({
+  name: "user.replay-registration",
+  schedule: "0 * * * *",
+  target: workflowTarget<GeneratedBusTypes>(
+    "workflow.user.registration",
+    () => ({
+      userId: "scheduled_user",
+      email: "cron@example.com",
+    }),
+  ),
   options: {
     timezone: "UTC",
-    protect: true,
+    paused: true,
   },
 });
 ```
 
-### Поля schedule
+## Target-формы
 
-- `name` — уникальное имя job.
-- `schedule` — cron expression.
-- `target` — что исполнять.
-- `input` — input для workflow target, если target задан строкой.
-- `meta` — дополнительные runtime meta при вызове workflow.
-- `options` — subset опций `croner`.
+`target` может быть:
 
-### Поля `options`
+- функцией `(executionContext) => ...`
+- string workflow key
+- `workflowRef(...)`
+- `workflowTarget(...)`
 
-Поддерживаются:
+Если target ссылается на workflow, adapter проверяет существование workflow key через core registry.
 
-- `timezone` — timezone для расписания.
-- `paused` — создать job в paused state.
-- `protect` — не запускать повторно job, пока предыдущий run не завершён.
-- `catch` — обработка ошибок Croner.
+## Runtime API
 
-## Что можно передать в `target`
+После подключения adapter доступны:
 
-Есть три варианта.
+- `app.adapter.cron.start()`
+- `app.adapter.cron.stop()`
+- `app.adapter.cron.reload()`
+- `app.adapter.cron.watch()`
+- `app.adapter.cron.unwatch()`
+- `app.adapter.cron.trigger(name)`
+- `app.adapter.cron.jobs`
 
-### 1. Строка workflow key
+## Job controller
 
-```ts
-defineCron({
-  name: "user.sync",
-  schedule: "0 * * * *",
-  target: "workflow.user.sync",
-  input: { full: true },
-});
-```
+Каждый `jobs[name]` содержит:
 
-### 2. `workflowRef()` / `workflowTarget()`
+- `name`
+- `schedule`
+- `running`
+- `nextRunAt`
+- `lastExecution`
+- `stop()`
+- `trigger(source?)`
 
-```ts
-defineCron({
-  name: "user.sync",
-  schedule: "0 * * * *",
-  target: workflowTarget("workflow.user.sync", () => ({ full: true })),
-});
-```
+## Execution metadata
 
-Это preferred способ, если хочется явный typed bridge к workflow.
-
-### 3. Функция
-
-```ts
-defineCron({
-  name: "custom.job",
-  schedule: "*/10 * * * *",
-  target: async ({ ctx, adapterContext, execution, schedule }) => {
-    await ctx.action.cleanup.run({ source: execution.source });
-  },
-});
-```
-
-## Контекст выполнения
-
-Function target и input resolver получают:
-
-```ts
-{
-  ctx,
-  adapterContext,
-  schedule,
-  execution,
-}
-```
-
-### Значение полей
-
-- `ctx` — application context.
-- `adapterContext` — `ctx`, `registry`, `runtime`, `manifest`, `console`.
-- `schedule` — текущая schedule declaration.
-- `execution` — информация о конкретном run.
-
-### Поля `execution`
-
-- `runId` — уникальный id запуска.
-- `source` — `manual` или `schedule`.
-- `startedAt` — время старта.
-
-## `jobs[name]`
-
-Каждый job controller содержит:
-
-```ts
-job.name
-job.schedule
-job.running
-job.nextRunAt
-job.lastExecution
-job.stop()
-job.trigger(source?)
-```
-
-### Что означает каждое поле
-
-- `name` — имя schedule.
-- `schedule` — cron expression.
-- `running` — запущен ли runtime job сейчас.
-- `nextRunAt` — следующая плановая дата запуска.
-- `lastExecution` — metadata о последнем run.
-- `stop()` — остановить конкретный job.
-- `trigger(source?)` — вручную запустить job controller.
-
-## `lastExecution`
-
-После выполнения job adapter сохраняет execution state:
+Во время запуска adapter хранит execution state:
 
 ```ts
 {
@@ -224,18 +104,7 @@ job.trigger(source?)
 }
 ```
 
-### Поля execution state
-
-- `runId` — id запуска.
-- `source` — `manual` или `schedule`.
-- `startedAt` — когда run начался.
-- `finishedAt` — когда run завершился.
-- `status` — `running`, `succeeded` или `failed`.
-- `error` — ошибка, если run упал.
-
-## Какой `meta` попадает в workflow
-
-Когда cron target вызывает workflow через runtime, adapter автоматически добавляет meta:
+А при вызове workflow в `meta` добавляются:
 
 - `source: "cron:<schedule-name>"`
 - `cronName`
@@ -243,34 +112,10 @@ job.trigger(source?)
 - `cronRunId`
 - `cronTriggeredAt`
 
-И затем мерджит:
+## Codegen
 
-- `schedule.meta`
-- `target.meta` для `workflowTarget(...)`
+После `orria-runtime generate` adapter пишет `src/generated/cron/schedule-registry.d.ts`, поэтому literal schedule names автоматически типизируются.
 
-## Рекомендуемая структура
+## Dev-flow
 
-```txt
-src/
-└── transport/
-    └── cron/
-        ├── adapter.ts
-        └── schedules/
-            ├── billing/
-            │   └── retry-failed-payments.ts
-            └── user/
-                └── replay-registration.ts
-```
-
-## Практический паттерн
-
-- schedule только описывает, *когда* и *что* запускать;
-- основная бизнес-логика остаётся в `workflow`;
-- ручной `trigger()` полезен для тестов и maintenance;
-- `reload()` удобен в dev-labs/runtime orchestration сценариях.
-
-## Known limitations
-
-- schedules поддерживают ручной `reload()` и file-watch auto-reload через `watch()/unwatch()`;
-- `orria-runtime generate` автоматически создаёт `src/generated/cron/schedule-registry.d.ts`, поэтому `trigger(name)` типизируется для literal schedule names;
-- подтверждённый backlog ведётся в `docs/TECH_DEBT.md#cron-adapter`.
+`watch()` отслеживает tree schedules и умеет безопасно пересобрать runtime jobs. После рефакторинга reload/watch path стал единым, а adapter code стал короче и понятнее для доработки.

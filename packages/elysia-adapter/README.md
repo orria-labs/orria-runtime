@@ -1,45 +1,41 @@
 # `@orria-labs/runtime-elysia`
 
-HTTP transport adapter для `@orria-labs/runtime` поверх `elysia`.
+HTTP/WebSocket adapter для `@orria-labs/runtime` поверх `elysia`.
 
-- npm: https://www.npmjs.com/package/@orria-labs/runtime-elysia
+- npm: `https://www.npmjs.com/package/@orria-labs/runtime-elysia`
 
 ## Что поддерживается
 
-- `createHttpAdapter({ rootDir })` для file-based discovery routes/plugins
-- `defineHttpAdapter<...>()({...})` как preferred API для общего экспорта `adapter` + typed `defineHandler`
-- `discoverHttpRoutes()` / `discoverHttpPlugins()` для явного discovery
-- `discoverHttpWsRouteModules()` для WebSocket discovery
-- `defineHandler()` для route handlers
-- `defineWs()` для file-based WebSocket routes
-- `createHandlerFactory()` как low-level helper для кастомных abstractions поверх handler factory
-- `definePlugin()` для Elysia plugins с доступом к `ctx`
-- global/per-route plugin refs
-- generated `HttpPluginRegistry` для typed string refs в `plugins: [...]`
-- `app.adapter.http.handle(request)`, `listen()`, `reload()`, `watch()` и `unwatch()`
+- file-based discovery маршрутов из `src/transport/http/router`
+- file-based discovery plugins из `src/transport/http/plugins`
+- HTTP handlers через `defineHandler(...)`
+- WebSocket routes через `defineWs(...)`
+- plugins с доступом к `ctx` через `definePlugin(...)`
+- global и per-route plugin refs
+- `buildHttpApplication(...)`, `createHttpAdapter(...)`, `defineHttpAdapter(...)`
+- `handle(request)`, `listen(...)`, `reload()`, `watch()`, `unwatch()`
+- generated типы для discovered app и string plugin refs
 
-String refs типизируются и в route-level `defineHandler({ plugins: [...] })`, и в adapter-level `defineHttpAdapter({ plugins: [...] })` после `orria-runtime generate`.
-
-## Базовое использование
+## Рекомендуемый способ подключения
 
 ```ts
-const app = await createApplication(
-  {
-    config,
-    database,
-    manifest,
-  },
-  {
-    http: httpAdapter,
-  },
-);
+import path from "node:path";
+import { defineHttpAdapter } from "@orria-labs/runtime-elysia";
 
-const response = await app.adapter.http.handle(
-  new Request("http://localhost/health"),
-);
+export const { adapter: httpAdapter, defineHandler, defineWs } =
+  defineHttpAdapter<GeneratedBusTypes, AppDatabase>()({
+    rootDir: path.resolve(import.meta.dir, "../../.."),
+    plugins: ["spec"],
+  });
 ```
 
+Если вы хотите держать route contracts отдельно от runtime bootstrap, используйте `createHandlerFactory(...)` и `createWsFactory(...)` в отдельном `contract.ts`, а в `adapter.ts` экспортируйте только `httpAdapter`.
+
+## Handler
+
 ```ts
+import { defineHandler } from "../contract.ts";
+
 export default defineHandler({
   plugins: ["request-source"],
   handle: ({ ctx }) => ({
@@ -54,7 +50,17 @@ export default defineHandler({
 });
 ```
 
+Контекст handler получает всё, что даёт Elysia, плюс:
+
+- `ctx` — `ApplicationContext`
+- `app` — Elysia app, расширенный plugin’ами
+- `transportContext` — сырой transport context
+
+## WebSocket route
+
 ```ts
+import { defineWs } from "@orria-labs/runtime-elysia";
+
 export default defineWs()({
   options: {
     message(ws, message) {
@@ -64,86 +70,54 @@ export default defineWs()({
 });
 ```
 
+## Plugins
+
 ```ts
-export const { adapter: httpAdapter, defineHandler } =
-  defineHttpAdapter<GeneratedBusTypes, ExampleDatabaseAdapter>()({
-    rootDir: import.meta.dir,
-    plugins: ["openapi", requestSourcePlugin],
-  });
-```
+import { definePlugin } from "@orria-labs/runtime-elysia";
 
-`defineHandler<...>()({...})` — основной и единственный API для typed route handlers.
-В реальном приложении его удобно экспортировать из `src/transport/http/adapter.ts` через `defineHttpAdapter(...)`.
-
-## Known limitations
-
-- HTTP adapter уже покрывает typed global plugins и dev watch/reload.
-- Подтверждённый remaining backlog теперь описан в `../../docs/TECH_DEBT.md#core`.
-
-Общий план развития лежит в `../../docs/ROADMAP.md`.
-
-## Целевая структура
-
-```txt
-src/transport/http/
-├── adapter.ts
-├── plugins/
-└── router/
+export default definePlugin({
+  refs: ["request-source"],
+  setup: ({ app }) =>
+    app.derive(({ request }) => ({
+      requestSource: request.headers.get("x-source") ?? "http",
+    })),
+});
 ```
 
 ## File-based naming
 
-- `users.get.ts` → `GET /users`
-- `users/post.ts` → `POST /users`
+- `health.get.ts` → `GET /health`
+- `user/create.post.ts` → `POST /user/create`
+- `v1/user-status.get.ts` → `GET /v1/user-status`
+- `v1/user/[id]/status.get.ts` → `GET /v1/user/:id/status`
+- `chat.ws.ts` → `WS /chat`
 - `index.get.ts` → `GET /`
 - `index.ws.ts` → `WS /`
-- `chat.ws.ts` → `WS /chat`
-- `ws.ts` → `WS /ws`
 
-## Typed SDK for discovered routes
+Если в проекте уже используются сегменты вроде `:id`, они тоже остаются валидными после нормализации.
 
-Если вы хотите использовать `typeof app.adapter.http.app` как SDK-тип для `edenFetch`/`edenTreaty`,
-адаптер теперь генерирует `src/generated/http/app.ts` и `src/generated/http/app-registry.d.ts`.
+## Codegen
 
-Чтобы не получить циклическую типизацию между generated app и file-based route modules,
-удобно держать typed route factories отдельно от runtime adapter, например в `src/transport/http/contract.ts`:
+После `orria-runtime generate` adapter пишет:
 
-```ts
-export const defineHandler = createHandlerFactory<...>()({ plugins: ["spec"] });
-export const defineWs = createWsFactory<...>()({ plugins: ["spec"] });
-```
+- `src/generated/http/app.ts`
+- `src/generated/http/app-registry.d.ts`
+- `src/generated/http/plugin-registry.d.ts`
 
-Тогда route modules импортируют `defineHandler` / `defineWs` из `contract.ts`,
-а bootstrap импортирует `httpAdapter` из `adapter.ts`.
+Это даёт:
 
-Сейчас generated typed app полноценно учитывает:
-- file-based routes
-- file-based ws routes
-- global plugin string refs
-- local/global plugin типы, если они проходят через typed factories route modules
+- типизацию discovered app через `HttpDiscoveredAppRegistry`
+- типизацию string refs в `plugins: [...]`
 
-Inline global plugin objects в `defineHttpAdapter({ plugins: [myPlugin] })` монтируются в runtime,
-но их типы не всегда можно автоматически восстановить в generated `app.ts`, если у codegen нет
-стабильной import-ссылки на исходный plugin module.
+## Dev-режим
 
-Для этого есть explicit API:
+`watch()` использует polling watcher из core и подходит для Bun/Node сценариев с file-based discovery. После недавнего рефакторинга watcher избегает лишнего хеширования неизменившихся файлов, что уменьшает I/O в больших деревьях маршрутов.
 
-```ts
-import { defineCodegenPlugin, defineHttpAdapter } from "@orria-labs/runtime-elysia";
-import authPlugin from "./plugins/auth.ts";
+## Полезные API
 
-const globalPlugins = [
-  defineCodegenPlugin(authPlugin, {
-    baseDir: import.meta.dir,
-    importPath: "./plugins/auth.ts",
-  }),
-] as const;
+- `buildHttpApplication(...)` — собрать Elysia app без adapter wrapper
+- `createHttpAdapter(...)` — готовый adapter factory
+- `defineHttpAdapter(...)` — adapter + typed route factories из одного места
+- `discoverHttpRoutes(...)`, `discoverHttpPlugins(...)`, `discoverHttpWsRouteModules(...)` — низкоуровневый discovery
 
-export const { adapter: httpAdapter } = defineHttpAdapter()({
-  rootDir: path.resolve(import.meta.dir, "../../.."),
-  plugins: globalPlugins,
-});
-```
-
-`defineCodegenPlugin(...)` не добавляет лишних static imports сам по себе.
-Он только прикрепляет metadata, которую codegen использует, если нужно восстановить plugin type в generated `app.ts`.
+Подробнее — `../../docs/http-adapter.md`.

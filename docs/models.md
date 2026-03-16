@@ -1,26 +1,27 @@
-# Модель framework-а
+# Модель проекта
 
-Этот документ — каноническая модель текущей реализации.
+Этот документ описывает текущую модель `Orria Runtime` по состоянию кода в репозитории.
 
-## Core procedures
+## Core-сущности
 
-| Сущность | Роль | Кто вызывает | Что может делать |
+| Сущность | Назначение | Кто вызывает | Что возвращает |
 | --- | --- | --- | --- |
-| `Action` | Атомарная write-операция | adapter, workflow | менять состояние, публиковать event |
-| `Query` | Read-only операция | adapter, workflow | только читать данные |
-| `Event` | Контракт факта | action, workflow | запускать subscriptions |
-| `Workflow` | Оркестратор процесса | adapter, event subscription | вызывать action/query, публиковать event |
+| `Action` | write-операция | adapter, workflow, другой код приложения | результат бизнес-операции |
+| `Query` | read-операция | adapter, workflow, другой код приложения | данные без побочных эффектов |
+| `Event` | контракт факта | action, workflow | `Promise<void>` |
+| `Workflow` | orchestration | adapter, event subscription, cron | результат orchestration-шага |
 
-## Дополнительные core-сущности
+## Вспомогательные сущности
 
-| Сущность | Роль |
+| Слой | Роль |
 | --- | --- |
-| `Discovery` | находит module declarations по файловой структуре |
-| `Registry` | хранит manifest и валидирует связи |
-| `Runtime` | исполняет handlers и строит bus |
-| `Typed Bus` | даёт `ctx.action.*`, `ctx.query.*`, `ctx.workflow.*`, `ctx.event.*` |
-| `Application Context` | единая runtime-точка доступа к bus, config, database, console |
-| `Subscription` | связь `event -> workflow`, задаётся через `subscribesTo` |
+| `Discovery` | находит declarations по файловой структуре |
+| `Manifest` | serializable описание найденных declarations |
+| `Registry` | нормализует manifest и хранит lookup-структуры |
+| `Runtime` | исполняет handlers и строит typed bus |
+| `ApplicationContext` | единый доступ к `console`, `config`, `database` и bus |
+| `Transport adapter` | переводит внешний сигнал в вызов runtime |
+| `Adapter codegen` | генерирует transport-specific typed артефакты |
 
 ## Application context
 
@@ -36,54 +37,77 @@ interface ApplicationContext<TBuses, TDatabase> {
 }
 ```
 
-Если `database` описан через `defineDatabaseAdapter`, то тип `ctx.database.client()` сохраняется в runtime-контексте приложения.
+Если `database` создан через `defineDatabaseAdapter(...)`, то `ctx.database.client()` и доступ к регионам остаются типизированными.
 
-## Что core делает сам
+## Runtime-модель
 
-- строит manifest из `src/modules`
-- генерирует typed bus declaration files
-- валидирует subscriptions
-- исполняет handlers через middleware pipeline
-- публикует локальные события и вызывает workflow subscribers
+### Safe path
 
-## Что core специально не делает
+- `input` / `payload` проходят через schema parsing
+- `returns` валидируется после `handle(...)`
+- middleware исполняются единым pipeline
+- `event` публикуется в `eventTransport`
+- локальные workflow subscribers вызываются автоматически
 
-- не поднимает HTTP / WS server
-- не управляет cron / worker execution
-- не навязывает ORM
-- не навязывает schema library
-- не содержит бизнес-логики приложения
+### Unsafe path
 
-## Adapter layer
+- `.unsafe(...)` пропускает schema parsing
+- типы при этом остаются привязаны к handler-level контракту
+- подходит для trusted-path участков, где данные уже провалидированы заранее
 
-Adapters — это входные точки, которые переводят внешний сигнал в bus-вызов.
+## Subscription-модель
 
-Примеры:
+Подписка задаётся в `workflow` через `subscribesTo: ["event.some.key"]`.
 
-- HTTP -> `ctx.action.*` / `ctx.query.*`
-- WebSocket -> `ctx.workflow.*`
-- CLI -> `ctx.action.*` / `ctx.workflow.*`
-- Scheduler / Worker -> будут подключены как отдельные adapter packages
+Во время построения registry runtime:
 
-## Разрешённые вызовы
+- проверяет существование event keys
+- строит карту `event -> workflow subscribers`
+- переиспользует её во время publish без повторного поиска по registry
 
-| Откуда | Куда можно |
-| --- | --- |
-| `Action` | `event`, иногда другой `action` |
-| `Query` | никуда в бизнес-смысле |
-| `Workflow` | `action`, `query`, `event` |
-| `Event` | никого не вызывает, только описывает факт |
-| `Adapter` | `action`, `query`, `workflow` |
+## Adapter-модель
 
-## Текущее правило зависимостей
+Adapters не меняют core-контракт. Они получают:
 
-```txt
-Adapters -> Core
-Modules -> Core
-Core -X-> Adapters
-Modules -X-> Adapters
-```
+- `ctx`
+- `registry`
+- `runtime`
+- `manifest`
+- `console`
 
-## Status note
+и реализуют внешний интерфейс, например:
 
-Сейчас `Subscription` реализован как metadata на `Workflow` через поле `subscribesTo`. Отдельный декларативный subscription-file format может появиться позже, если это даст выигрыш в DX.
+- HTTP: `handle()`, `listen()`, `reload()`, `watch()`
+- CLI: `run()`, `invoke()`, `renderUsage()`
+- Cron: `start()`, `trigger()`, `jobs[]`
+
+## Codegen-модель
+
+Codegen делится на два уровня:
+
+### 1. Core codegen
+
+Пишет:
+
+- `src/generated/core/manifest.ts`
+- `src/generated/core/bus.d.ts`
+- `src/generated/core/index.ts`
+
+### 2. Adapter codegen
+
+Запускается автоматически после core codegen и зависит от установленных пакетов:
+
+- HTTP adapter — discovered app и plugin registry
+- CLI adapter — command registry и aliases
+- Cron adapter — schedule registry
+
+## Почему модель удобна
+
+- бизнес-логика живёт в modules, а не в transport-слое
+- adapters можно подключать и отключать независимо
+- типы выводятся из generated manifest, а не дублируются вручную
+- file-based discovery и codegen снижают объём ручной wiring-логики
+
+## Текущее ограничение
+
+В текущей модели нет durable queue / outbox слоя. Все остальные основные части runtime-контура уже реализованы и покрыты тестами.

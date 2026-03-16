@@ -1,220 +1,175 @@
-# Контракты и соглашения
+# Контракты
 
-## Packages
+Этот документ фиксирует текущие файловые, runtime и build-time контракты проекта.
 
-- `packages/core` — runtime, discovery, registry, codegen, cli
-- `packages-labs/runtime-elysia` — HTTP transport integration surface
-- `packages-labs/runtime-citty` — CLI transport integration surface
-- `packages-labs/runtime-croner` — cron transport integration surface
-- `example` — приложение, использующее framework
+## 1. Core module contracts
 
-## Adapter docs
+### File naming
 
-- `docs/http-adapter.md` — HTTP adapter на Elysia
-- `docs/cli-adapter.md` — CLI adapter на Citty
-- `docs/cron-adapter.md` — cron adapter на Croner
-- `docs/ROADMAP.md` — текущая дорожная карта: completed scope + следующий план работ
-- `docs/TECH_DEBT.md` — подтверждённые ограничения, техдолг и ближайший backlog
+Core discovery ищет только следующие шаблоны:
 
-## File naming
+- `src/modules/**/*.action.ts`
+- `src/modules/**/*.query.ts`
+- `src/modules/**/*.workflow.ts`
+- `src/modules/**/*.event.ts`
 
-Core discovery сканирует только `src/modules` и использует suffix-based contracts:
+### Default export
 
-- `*.action.ts`
-- `*.query.ts`
-- `*.workflow.ts`
-- `*.event.ts`
+Каждый файл должен экспортировать declaration по `default`.
 
-Из пути формируется bus key:
+### Suffix ↔ kind
 
-- `src/modules/user/create.action.ts` -> `action.user.create`
-- `src/modules/user/get.query.ts` -> `query.user.get`
-- `src/modules/user/registration.workflow.ts` -> `workflow.user.registration`
-- `src/modules/user/registered.event.ts` -> `event.user.registered`
+Суффикс файла и declaration kind должны совпадать:
 
-## Declaration shape
+- `.action.ts` → `defineAction(...)`
+- `.query.ts` → `defineQuery(...)`
+- `.workflow.ts` → `defineWorkflow(...)`
+- `.event.ts` → `defineEvent(...)`
 
-### Action
+## 2. Registry contracts
 
-```ts
-import z from "zod";
+Во время `createRegistry(...)` валидируются:
 
-export default defineAction({
-  input: z.object({ id: z.string() }),
-  returns: z.object({ ok: z.boolean() }),
-  handle: async ({ ctx, input, meta }) => output,
-});
-```
+- уникальность `entry.key`
+- отсутствие cross-kind конфликта для одного logical name
+- существование всех `subscribesTo` event keys
 
-### Query
+Registry хранит:
 
-```ts
-import z from "zod";
+- `entries`
+- `byKey`
+- `byKind`
+- `eventSubscribers`
 
-export default defineQuery({
-  input: z.object({ id: z.string() }),
-  returns: z.object({ id: z.string(), title: z.string() }),
-  handle: async ({ ctx, input, meta }) => output,
-});
-```
+## 3. Bus contracts
 
-### Workflow
+Каждый generated bus-метод:
+
+- остаётся вызываемой функцией
+- имеет `.unsafe(...)`
+- несёт metadata: `$key`, `$kind`, `$definition`, `$schema`
+
+Пример:
 
 ```ts
-import z from "zod";
+const method = app.ctx.query.user.get;
 
-export default defineWorkflow({
-  input: z.object({ userId: z.string() }),
-  returns: z.void(),
-  subscribesTo: ["event.user.registered"],
-  handle: async ({ ctx, input, meta }) => output,
-});
-```
-
-### Event
-
-```ts
-import z from "zod";
-
-export default defineEvent({
-  payload: z.object({ userId: z.string() }),
-  version: 1,
-});
-```
-
-## Runtime contract
-
-Все executable handlers вызываются одинаково:
-
-```ts
-handler({ ctx, input, meta })
-```
-
-Где:
-
-- `ctx` — application context
-- `input` — уже распарсенный input
-- `meta` — invocation metadata
-
-У bus-метода доступны declaration metadata и schema:
-
-```ts
-const method = app.ctx.action.user.create;
+await method({ userId: "123" });
+await method.unsafe({ userId: "123" });
 
 method.$key;
-method.$definition;
 method.$schema.input;
 method.$schema.returns;
-method.unsafe;
 ```
 
-## Safe / unsafe bus calls
+## 4. Schema contract
 
-По умолчанию bus-метод работает в safe-режиме и применяет declaration schemas.
+Runtime ожидает schema-объект с:
+
+- `parse(value)`
+- опционально `parseAsync(value)`
+
+Это делает runtime совместимым с `zod` и другими schema libraries, поддерживающими такой shape.
+
+## 5. Application contract
+
+`createApplication(...)` принимает:
 
 ```ts
-await ctx.query.user.get({ userId: "123" });
+{
+  config,
+  database,
+  manifest,
+  console?,
+  middleware?,
+  eventTransport?,
+  setGlobalCtx?,
+}
 ```
 
-Если данные уже провалидированы заранее и повторная schema-валидация не нужна, можно использовать trusted-path вызов:
+Возвращает:
 
 ```ts
-await ctx.query.user.get.unsafe({ userId: "123" });
+{
+  ctx,
+  registry,
+  runtime,
+  adapter,
+}
 ```
 
-Разница:
+Если передан `setGlobalCtx: true`, runtime-контекст записывается в `globalThis.ctx`.
 
-- safe: применяет `input` / `returns` / `payload` schemas
-- unsafe: пропускает schema parsing/validation и использует handler-level input/output types
+## 6. Adapter contract
 
-## Generated artifacts
-
-CLI генерирует framework-артефакты в `src/generated/core`:
-
-- `manifest.ts` — runtime manifest с импортами declarations
-- `bus.d.ts` — typed bus interfaces
-- `index.ts` — re-export generated contract surface
-
-Это позволяет держать generated-код внутри `src` и рядом хранить другие targets:
-
-- `src/generated/prisma`
-- `src/generated/database`
-
-## Bootstrap contract
-
-Приложение собирается так:
+Любой transport adapter создаётся через `defineTransportAdapter(...)` и получает `CreateApplicationAdapterContext`:
 
 ```ts
-import { createApplication } from "@orria-labs/runtime";
-import { manifest } from "./generated/core/index.ts";
-import { database } from "./database";
-import { httpAdapter } from "./transport/http/adapter.ts";
-
-const app = await createApplication(
-  {
-    config,
-    database,
-    manifest,
-  },
-  {
-    http: httpAdapter,
-  },
-);
+{
+  ctx,
+  registry,
+  runtime,
+  manifest,
+  console,
+}
 ```
 
-`createApplication(...)` выводит bus-типы из `manifest`, поэтому generated `GeneratedBusTypes` не нужно отдельно дублировать в bootstrap-коде.
+Это единая точка интеграции для HTTP, CLI, cron и будущих transport-слоёв.
 
-## CLI
+## 7. Codegen contract
 
-CLI теперь показывает help по умолчанию, а также поддерживает версию:
+### Core CLI
 
 ```bash
-orria-runtime
-orria-runtime --help
-orria-runtime --version
-orria-runtime help
-orria-runtime version
-orria-runtime init
-orria-runtime generate --root . --out src/generated/core
+orria-runtime generate --root . --modules src/modules --out src/generated/core
 ```
 
-## Database adapter contract
+Эта команда:
 
-Рекомендуемый способ подключать БД — через `defineDatabaseAdapter` в `src/database.ts` или `src/database/adapter.ts`.
+1. строит manifest
+2. пишет core generated files
+3. находит установленные `@orria-labs/*` adapters в `package.json`
+4. запускает их `orriaAdapterCodegen`
+
+### Adapter outputs
+
+- HTTP: `src/generated/http/app.ts`, `src/generated/http/app-registry.d.ts`, `src/generated/http/plugin-registry.d.ts`
+- CLI: `src/generated/cli/command-registry.d.ts`
+- Cron: `src/generated/cron/schedule-registry.d.ts`
+
+## 8. CLI contract
+
+`orria-runtime` сейчас поддерживает:
+
+- `generate`
+- `init`
+- `help`
+- `version`
+
+`init` умеет scaffold для `http`, `cli`, `cron` или `none`.
+
+## 9. Database contract
+
+Для простого случая доступен `createDatabase(...)`.
+
+Для полноценного typed adapter используется:
 
 ```ts
-const database = defineDatabaseAdapter({
-  default: "primary",
-  clients: {
-    primary: prisma,
-    analytics: analyticsClient,
-  },
-  aliases: {
-    default: "primary",
-  },
-  normalizeRegion: (region) => region.trim().toLowerCase(),
-});
+defineDatabaseAdapter({
+  clients,
+  default,
+  aliases?,
+  normalizeRegion?,
+})
 ```
 
-Поведение:
+## 10. Watch contract
 
-- `ctx.database.client()` возвращает default client с сохранённым типом
-- `ctx.database.client("primary")` возвращает клиент указанного региона
-- неизвестный регион вызывает `throw Error`
+Все текущие adapters используют polling watcher из core. Он:
 
-## Validation rules
+- рекурсивно следит за файлами
+- фильтрует только поддерживаемые source files
+- игнорирует временные `orria`-модули
+- оптимизирует повторные проходы за счёт кеша fingerprint’ов файлов
 
-Registry валидирует:
-
-- duplicate bus keys
-- cross-kind conflicts по logical name
-- `subscribesTo` на несуществующие events
-
-## Current scope
-
-Подтверждённые ограничения и нереализованные части теперь ведутся в `docs/TECH_DEBT.md`.
-
-Для core это сейчас означает:
-
-- нет durable queue / outbox слоя;
-- scheduling живёт во внешнем `@orria-labs/runtime-croner`, а не внутри core.
+Это часть общей гарантии стабильного dev-flow для file-based discovery под Bun/Node.
