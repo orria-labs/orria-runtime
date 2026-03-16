@@ -31,19 +31,17 @@ export async function discoverCronScheduleModules(
   );
 
   const filePaths = await collectScheduleFiles(schedulesRootDir);
-  const modules: ResolvedCronScheduleModule[] = [];
+  return Promise.all(
+    filePaths.map(async (filePath) => {
+      const moduleExports = await importFreshModule<Record<string, unknown>>(filePath);
+      const schedules = extractSchedulesFromModule(moduleExports, filePath);
 
-  for (const filePath of filePaths) {
-    const moduleExports = await importFreshModule<Record<string, unknown>>(filePath);
-    const schedules = extractSchedulesFromModule(moduleExports, filePath);
-
-    modules.push({
-      filePath,
-      schedules,
-    });
-  }
-
-  return modules;
+      return {
+        filePath,
+        schedules,
+      };
+    }),
+  );
 }
 
 export function validateCronSchedules(

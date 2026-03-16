@@ -44,30 +44,30 @@ export async function buildHttpApplication<
   adapterContext: CreateApplicationAdapterContext<TBuses, TDatabase>,
   options: BuildHttpApplicationOptions<TBuses, TDatabase> = {},
 ): Promise<Elysia> {
-  const createdApp = options.createApp
-    ? await options.createApp(adapterContext)
-    : undefined;
-  const discoveredPlugins = options.rootDir
-    ? await discoverHttpPlugins({
+  const [createdApp, discoveredPlugins, discoveredRoutes, discoveredWsRoutes] = await Promise.all([
+    options.createApp ? options.createApp(adapterContext) : undefined,
+    options.rootDir
+      ? discoverHttpPlugins({
         rootDir: options.rootDir,
         pluginsDir: options.pluginsDir,
         routesDir: options.routesDir,
       })
-    : [];
-  const discoveredRoutes = options.rootDir
-    ? await discoverHttpRoutes({
+      : [],
+    options.rootDir
+      ? discoverHttpRoutes({
         rootDir: options.rootDir,
         pluginsDir: options.pluginsDir,
         routesDir: options.routesDir,
       })
-    : [];
-  const discoveredWsRoutes = options.rootDir
-    ? await discoverHttpWsRouteModules({
+      : [],
+    options.rootDir
+      ? discoverHttpWsRouteModules({
         rootDir: options.rootDir,
         pluginsDir: options.pluginsDir,
         routesDir: options.routesDir,
       })
-    : [];
+      : [],
+  ]);
   const pluginRegistry = createPluginRegistry(discoveredPlugins.map((entry) => entry.plugin));
   const routes = [...discoveredRoutes, ...(options.routes ?? [])] as Array<
     HttpHandlerDefinition<any, any, any, any, any, any>
@@ -114,22 +114,29 @@ export function createHttpAdapter<
       type AdapterApp = ResolveHttpAdapterApp<TBuses, TDatabase, TPlugins>;
 
       let app = await buildHttpApplication(adapterContext, options) as unknown as AdapterApp;
+      const syncArtifacts = async () => {
+        if (!options.rootDir) {
+          return;
+        }
 
-      if (options.rootDir) {
-        await generateHttpAppRegistryArtifacts({
-          rootDir: options.rootDir,
-          routesDir: options.routesDir,
-          globalPlugins: options.plugins,
-        });
-        await generateHttpPluginRegistryArtifacts({
-          rootDir: options.rootDir,
-          pluginsDir: options.pluginsDir,
-        });
-      }
+        await Promise.all([
+          generateHttpAppRegistryArtifacts({
+            rootDir: options.rootDir,
+            routesDir: options.routesDir,
+            globalPlugins: options.plugins,
+          }),
+          generateHttpPluginRegistryArtifacts({
+            rootDir: options.rootDir,
+            pluginsDir: options.pluginsDir,
+          }),
+        ]);
+      };
+
+      await syncArtifacts();
 
       let listeningApp: { stop?: () => unknown } | undefined;
       let listeningArgs: Parameters<Elysia["listen"]> | undefined;
-      let watcher = createHttpWatcher(options, adapterContext, async () => {
+      const reloadApplication = async (withArtifacts = false) => {
         app = await buildHttpApplication(adapterContext, options) as unknown as AdapterApp;
 
         if (listeningApp && listeningArgs) {
@@ -137,18 +144,15 @@ export function createHttpAdapter<
           listeningApp = app.listen(...listeningArgs);
         }
 
-        if (options.rootDir) {
-          await generateHttpAppRegistryArtifacts({
-            rootDir: options.rootDir,
-            routesDir: options.routesDir,
-            globalPlugins: options.plugins,
-          });
-          await generateHttpPluginRegistryArtifacts({
-            rootDir: options.rootDir,
-            pluginsDir: options.pluginsDir,
-          });
+        if (withArtifacts) {
+          await syncArtifacts();
         }
-      });
+      };
+      let watcher = createHttpWatcher(
+        options,
+        adapterContext,
+        () => reloadApplication(true),
+      );
 
       return {
         kind: "http",
@@ -165,35 +169,15 @@ export function createHttpAdapter<
           return instance as unknown as ReturnType<Elysia["listen"]>;
         },
         handle: (request) => app.handle(request),
-        reload: async () => {
-          app = await buildHttpApplication(adapterContext, options) as unknown as AdapterApp;
-
-          if (listeningApp && listeningArgs) {
-            await Promise.resolve((listeningApp as { stop?: () => unknown }).stop?.());
-            listeningApp = app.listen(...listeningArgs);
-          }
-        },
+        reload: () => reloadApplication(),
         watch: async (watchOptions) => {
-          watcher = createHttpWatcher(options, adapterContext, async () => {
-            app = await buildHttpApplication(adapterContext, options) as unknown as AdapterApp;
-
-            if (listeningApp && listeningArgs) {
-              await Promise.resolve((listeningApp as { stop?: () => unknown }).stop?.());
-              listeningApp = app.listen(...listeningArgs);
-            }
-
-            if (options.rootDir) {
-              await generateHttpAppRegistryArtifacts({
-                rootDir: options.rootDir,
-                routesDir: options.routesDir,
-                globalPlugins: options.plugins,
-              });
-              await generateHttpPluginRegistryArtifacts({
-                rootDir: options.rootDir,
-                pluginsDir: options.pluginsDir,
-              });
-            }
-          }, watcher, watchOptions);
+          watcher = createHttpWatcher(
+            options,
+            adapterContext,
+            () => reloadApplication(true),
+            watcher,
+            watchOptions,
+          );
           await watcher.start();
         },
         unwatch: () => {

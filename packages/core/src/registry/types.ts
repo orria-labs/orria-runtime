@@ -25,11 +25,6 @@ export interface GeneratedManifest<
   readonly __buses__?: TBuses;
 }
 
-export interface RegistrySubscriber {
-  key: string;
-  kind: "workflow";
-}
-
 export interface RegistryEntryBase {
   key: string;
   kind: HandlerKind;
@@ -43,10 +38,25 @@ export interface EventRegistryEntry extends RegistryEntryBase {
   declaration: EventDeclaration<unknown>;
 }
 
-export interface ExecutableRegistryEntry extends RegistryEntryBase {
-  kind: "action" | "query" | "workflow";
+export interface ActionRegistryEntry extends RegistryEntryBase {
+  kind: "action";
   declaration: AnyExecutableDeclaration;
 }
+
+export interface QueryRegistryEntry extends RegistryEntryBase {
+  kind: "query";
+  declaration: AnyExecutableDeclaration;
+}
+
+export interface WorkflowRegistryEntry extends RegistryEntryBase {
+  kind: "workflow";
+  declaration: AnyExecutableDeclaration;
+}
+
+export type ExecutableRegistryEntry =
+  | ActionRegistryEntry
+  | QueryRegistryEntry
+  | WorkflowRegistryEntry;
 
 export type RegistryEntry = EventRegistryEntry | ExecutableRegistryEntry;
 
@@ -55,10 +65,10 @@ export interface CoreRegistry {
   entries: RegistryEntry[];
   byKey: Map<string, RegistryEntry>;
   byKind: {
-    action: ExecutableRegistryEntry[];
-    query: ExecutableRegistryEntry[];
-    workflow: ExecutableRegistryEntry[];
+    action: ActionRegistryEntry[];
+    query: QueryRegistryEntry[];
+    workflow: WorkflowRegistryEntry[];
     event: EventRegistryEntry[];
   };
-  eventSubscribers: Map<string, RegistrySubscriber[]>;
+  eventSubscribers: Map<string, WorkflowRegistryEntry[]>;
 }

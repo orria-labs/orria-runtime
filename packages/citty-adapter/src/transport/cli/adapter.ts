@@ -44,16 +44,24 @@ export function createCliAdapter<
 ) {
   return defineTransportAdapter<CliAdapterInstance, TBuses, TDatabase>(async (adapterContext) => {
     let resolved = await buildCliRuntime(options, adapterContext);
-    let watcher = createCliWatcher(options, adapterContext, async () => {
+    const syncArtifacts = async () => {
+      if (!options.rootDir) {
+        return;
+      }
+
+      await generateCliCommandRegistryArtifacts({
+        rootDir: options.rootDir,
+        commandsDir: options.commandsDir,
+      });
+    };
+    const reloadRuntime = async (withArtifacts = false) => {
       resolved = await buildCliRuntime(options, adapterContext);
 
-      if (options.rootDir) {
-        await generateCliCommandRegistryArtifacts({
-          rootDir: options.rootDir,
-          commandsDir: options.commandsDir,
-        });
+      if (withArtifacts) {
+        await syncArtifacts();
       }
-    });
+    };
+    let watcher = createCliWatcher(options, adapterContext, () => reloadRuntime(true));
 
     return {
       kind: "cli",
@@ -66,20 +74,15 @@ export function createCliAdapter<
       run: (rawArgs) => resolved.main({ rawArgs: rawArgs ? [...rawArgs] : undefined }),
       invoke: (rawArgs) => invokeCommand(resolved.command, rawArgs ? [...rawArgs] : []),
       renderUsage: () => renderUsage(resolved.command),
-      reload: async () => {
-        resolved = await buildCliRuntime(options, adapterContext);
-      },
+      reload: () => reloadRuntime(),
       watch: async (watchOptions) => {
-        watcher = createCliWatcher(options, adapterContext, async () => {
-          resolved = await buildCliRuntime(options, adapterContext);
-
-          if (options.rootDir) {
-            await generateCliCommandRegistryArtifacts({
-              rootDir: options.rootDir,
-              commandsDir: options.commandsDir,
-            });
-          }
-        }, watcher, watchOptions);
+        watcher = createCliWatcher(
+          options,
+          adapterContext,
+          () => reloadRuntime(true),
+          watcher,
+          watchOptions,
+        );
         await watcher.start();
       },
       unwatch: () => {
@@ -96,15 +99,15 @@ async function buildCliRuntime<
   options: CreateCliAdapterOptions<TBuses, TDatabase>,
   adapterContext: CreateApplicationAdapterContext<TBuses, TDatabase>,
 ): Promise<{ command: CommandDef; main: ReturnType<typeof createMain> }> {
-  const discoveredCommands = options.rootDir
-    ? await discoverCliCommands({
-        rootDir: options.rootDir,
-        commandsDir: options.commandsDir,
-      })
-    : [];
-  const packageMeta = options.rootDir
-    ? await resolveCliPackageMeta(options.rootDir)
-    : undefined;
+  const [discoveredCommands, packageMeta] = options.rootDir
+    ? await Promise.all([
+        discoverCliCommands({
+          rootDir: options.rootDir,
+          commandsDir: options.commandsDir,
+        }),
+        resolveCliPackageMeta(options.rootDir),
+      ])
+    : [[], undefined];
   const commands = [
     ...discoveredCommands,
     ...(options.commands ?? []),

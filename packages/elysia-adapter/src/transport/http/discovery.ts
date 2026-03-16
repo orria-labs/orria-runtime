@@ -45,25 +45,26 @@ export async function discoverHttpRouteModules(
     options.routesDir ?? DEFAULT_ROUTES_DIR,
   );
   const filePaths = await collectFiles(routesRootDir);
-  const modules: ResolvedHttpRouteModule[] = [];
 
-  for (const filePath of filePaths) {
-    const discovered = normalizeHttpTransportFile(routesRootDir, filePath);
-    if (discovered.kind !== "http") {
-      continue;
-    }
+  const modules = await Promise.all(
+    filePaths.map(async (filePath) => {
+      const discovered = normalizeHttpTransportFile(routesRootDir, filePath);
+      if (discovered.kind !== "http") {
+        return undefined;
+      }
 
-    const routeModule = await importFreshModule<Record<string, unknown>>(filePath);
-    const route = extractRoute(routeModule, filePath, discovered);
+      const routeModule = await importFreshModule<Record<string, unknown>>(filePath);
+      const route = extractRoute(routeModule, filePath, discovered);
 
-    modules.push({
-      filePath,
-      id: `${route.method} ${route.path}`,
-      route,
-    });
-  }
+      return {
+        filePath,
+        id: `${route.method} ${route.path}`,
+        route,
+      } satisfies ResolvedHttpRouteModule;
+    }),
+  );
 
-  return modules;
+  return modules.filter((module): module is ResolvedHttpRouteModule => Boolean(module));
 }
 
 export async function discoverHttpWsRouteModules(
@@ -74,25 +75,26 @@ export async function discoverHttpWsRouteModules(
     options.routesDir ?? DEFAULT_ROUTES_DIR,
   );
   const filePaths = await collectFiles(routesRootDir);
-  const modules: ResolvedHttpWsRouteModule[] = [];
 
-  for (const filePath of filePaths) {
-    const discovered = normalizeHttpTransportFile(routesRootDir, filePath);
-    if (discovered.kind !== "ws") {
-      continue;
-    }
+  const modules = await Promise.all(
+    filePaths.map(async (filePath) => {
+      const discovered = normalizeHttpTransportFile(routesRootDir, filePath);
+      if (discovered.kind !== "ws") {
+        return undefined;
+      }
 
-    const routeModule = await importFreshModule<Record<string, unknown>>(filePath);
-    const resolved = extractWsRoute(routeModule, filePath, discovered.path);
+      const routeModule = await importFreshModule<Record<string, unknown>>(filePath);
+      const resolved = extractWsRoute(routeModule, filePath, discovered.path);
 
-    modules.push({
-      filePath,
-      id: resolved.route?.path ? `WS ${resolved.route.path}` : `WS ${filePath}`,
-      ...resolved,
-    });
-  }
+      return {
+        filePath,
+        id: resolved.route?.path ? `WS ${resolved.route.path}` : `WS ${filePath}`,
+        ...resolved,
+      } satisfies ResolvedHttpWsRouteModule;
+    }),
+  );
 
-  return modules;
+  return modules.filter((module): module is ResolvedHttpWsRouteModule => Boolean(module));
 }
 
 export async function discoverHttpPlugins(
@@ -103,21 +105,20 @@ export async function discoverHttpPlugins(
     options.pluginsDir ?? DEFAULT_PLUGINS_DIR,
   );
   const filePaths = await collectFiles(pluginsRootDir);
-  const modules: ResolvedHttpPluginModule[] = [];
 
-  for (const filePath of filePaths) {
-    const pluginModule = await importFreshModule<Record<string, unknown>>(filePath);
-    const name = normalizePluginName(pluginsRootDir, filePath);
-    const plugin = extractPlugin(pluginModule, filePath, name);
+  return Promise.all(
+    filePaths.map(async (filePath) => {
+      const pluginModule = await importFreshModule<Record<string, unknown>>(filePath);
+      const name = normalizePluginName(pluginsRootDir, filePath);
+      const plugin = extractPlugin(pluginModule, filePath, name);
 
-    modules.push({
-      filePath,
-      name,
-      plugin,
-    });
-  }
-
-  return modules;
+      return {
+        filePath,
+        name,
+        plugin,
+      };
+    }),
+  );
 }
 
 export function validateHttpRoutes(routes: HttpHandlerDefinition[]): void {

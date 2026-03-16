@@ -34,25 +34,26 @@ export async function discoverManifest(
   for (const target of targets) {
     const absoluteBaseDir = path.join(rootDir, target.baseDir);
     const filePaths = await walkFiles(absoluteBaseDir);
+    const discoveredEntries = await Promise.all(
+      filePaths
+        .filter((filePath) => filePath.endsWith(target.suffix))
+        .map(async (filePath) => {
+          const declaration = await loadDeclaration(filePath, target.kind);
+          const relativeFilePath = toPosixPath(path.relative(rootDir, filePath));
+          const relativeHandlerPath = toPosixPath(path.relative(absoluteBaseDir, filePath));
+          const logicalName = handlerSegments(relativeHandlerPath, target.suffix).join(".");
 
-    for (const filePath of filePaths) {
-      if (!filePath.endsWith(target.suffix)) {
-        continue;
-      }
+          return {
+            key: `${target.kind}.${logicalName}`,
+            kind: target.kind,
+            logicalName,
+            modulePath: relativeFilePath,
+            declaration,
+          } satisfies GeneratedManifestEntry;
+        }),
+    );
 
-      const declaration = await loadDeclaration(filePath, target.kind);
-      const relativeFilePath = toPosixPath(path.relative(rootDir, filePath));
-      const relativeHandlerPath = toPosixPath(path.relative(absoluteBaseDir, filePath));
-      const logicalName = handlerSegments(relativeHandlerPath, target.suffix).join(".");
-
-      entries.push({
-        key: `${target.kind}.${logicalName}`,
-        kind: target.kind,
-        logicalName,
-        modulePath: relativeFilePath,
-        declaration,
-      });
-    }
+    entries.push(...discoveredEntries);
   }
 
   entries.sort((left, right) => left.key.localeCompare(right.key));

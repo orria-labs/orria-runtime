@@ -4,7 +4,7 @@ import type {
   ExecutableRegistryEntry,
   GeneratedManifest,
   RegistryEntry,
-  RegistrySubscriber,
+  WorkflowRegistryEntry,
 } from "./types.ts";
 
 const KINDS = ["action", "query", "workflow", "event"] as const;
@@ -47,7 +47,7 @@ export function createRegistry(manifest: GeneratedManifest): CoreRegistry {
     byKind[entry.kind].push(registryEntry as never);
   }
 
-  const eventSubscribers = new Map<string, RegistrySubscriber[]>();
+  const eventSubscribers = new Map<string, WorkflowRegistryEntry[]>();
   const eventKeys = new Set(byKind.event.map((entry) => entry.key));
 
   registerSubscribers(byKind.workflow, eventKeys, eventSubscribers);
@@ -66,9 +66,9 @@ export function createRegistry(manifest: GeneratedManifest): CoreRegistry {
 }
 
 function registerSubscribers(
-  entries: ExecutableRegistryEntry[],
+  entries: WorkflowRegistryEntry[],
   eventKeys: Set<string>,
-  eventSubscribers: Map<string, RegistrySubscriber[]>,
+  eventSubscribers: Map<string, WorkflowRegistryEntry[]>,
 ): void {
   for (const entry of entries) {
     const declaration = entry.declaration as WorkflowDeclaration<unknown, unknown, any>;
@@ -80,7 +80,7 @@ function registerSubscribers(
       }
 
       const subscribers = eventSubscribers.get(eventKey) ?? [];
-      subscribers.push({ key: entry.key, kind: "workflow" });
+      subscribers.push(entry);
       eventSubscribers.set(eventKey, subscribers);
     }
   }

@@ -56,6 +56,10 @@ class Runtime<
   readonly #registry: CoreRegistry;
   readonly #getContext: () => TContext;
   readonly #middleware: Array<CoreMiddleware<TContext>>;
+  readonly #middlewareCache = new WeakMap<
+    ExecutableRegistryEntry,
+    Array<CoreMiddleware<TContext>>
+  >();
   readonly #eventTransport: EventTransport;
 
   constructor(options: CreateRuntimeOptions<TContext, TBuses>) {
@@ -80,12 +84,7 @@ class Runtime<
     input: unknown,
     meta: HandlerInvocationMeta = {},
   ): Promise<unknown> {
-    const entry = getRegistryEntry(this.#registry, key);
-    if (entry.kind !== kind) {
-      throw new Error(`Handler "${key}" is registered as "${entry.kind}", expected "${kind}"`);
-    }
-
-    return this.#invokeExecutable(entry, input, meta);
+    return this.#runExecutable(this.#getExecutableEntry(key, kind), input, meta);
   }
 
   async publish(
@@ -93,29 +92,7 @@ class Runtime<
     payload: unknown,
     meta: HandlerInvocationMeta = {},
   ): Promise<void> {
-    const entry = getRegistryEntry(this.#registry, key);
-    if (entry.kind !== "event") {
-      throw new Error(`Handler "${key}" is not an event declaration`);
-    }
-
-    const parsedPayload = await this.#parsePayload(entry, payload);
-    const normalizedMeta = { ...meta };
-
-    await this.#eventTransport.publish({
-      key,
-      payload: parsedPayload,
-      meta: normalizedMeta,
-      version: entry.declaration.version,
-    });
-
-    const subscribers = this.#registry.eventSubscribers.get(key) ?? [];
-    for (const subscriber of subscribers) {
-      await this.invoke("workflow", subscriber.key, parsedPayload, {
-        ...normalizedMeta,
-        source: key,
-        eventKey: key,
-      });
-    }
+    return this.#publishEvent(this.#getEventEntry(key), payload, meta, false);
   }
 
   async #invokeExecutableUnsafe(
@@ -123,31 +100,7 @@ class Runtime<
     input: unknown,
     meta: HandlerInvocationMeta,
   ): Promise<unknown> {
-    const ctx = this.#getContext();
-    const middleware = [...this.#middleware, ...(entry.declaration.middleware ?? [])];
-
-    let index = -1;
-    const run = async (): Promise<unknown> => {
-      index += 1;
-      const current = middleware[index];
-
-      if (!current) {
-        return entry.declaration.handle({ ctx, input, meta });
-      }
-
-      return current(
-        {
-          kind: entry.kind,
-          key: entry.key,
-          input,
-          ctx,
-          meta,
-        },
-        run,
-      );
-    };
-
-    return run();
+    return this.#runExecutable(entry, input, meta, true);
   }
 
   async #publishUnsafe(
@@ -155,43 +108,18 @@ class Runtime<
     payload: unknown,
     meta: HandlerInvocationMeta = {},
   ): Promise<void> {
-    const entry = getRegistryEntry(this.#registry, key);
-    if (entry.kind !== "event") {
-      throw new Error(`Handler "${key}" is not an event declaration`);
-    }
-
-    const normalizedMeta = { ...meta };
-
-    await this.#eventTransport.publish({
-      key,
-      payload,
-      meta: normalizedMeta,
-      version: entry.declaration.version,
-    });
-
-    const subscribers = this.#registry.eventSubscribers.get(key) ?? [];
-    for (const subscriber of subscribers) {
-      const subscriberEntry = getRegistryEntry(this.#registry, subscriber.key);
-      if (subscriberEntry.kind !== "workflow") {
-        continue;
-      }
-
-      await this.#invokeExecutableUnsafe(subscriberEntry, payload, {
-        ...normalizedMeta,
-        source: key,
-        eventKey: key,
-      });
-    }
+    return this.#publishEvent(this.#getEventEntry(key), payload, meta, true);
   }
 
-  async #invokeExecutable(
+  async #runExecutable(
     entry: ExecutableRegistryEntry,
     input: unknown,
     meta: HandlerInvocationMeta,
+    unsafe = false,
   ): Promise<unknown> {
     const ctx = this.#getContext();
-    const parsedInput = await this.#parseInput(entry, input);
-    const middleware = [...this.#middleware, ...(entry.declaration.middleware ?? [])];
+    const resolvedInput = unsafe ? input : await this.#parseInput(entry, input);
+    const middleware = this.#resolveMiddleware(entry);
 
     let index = -1;
     const run = async (): Promise<unknown> => {
@@ -199,14 +127,14 @@ class Runtime<
       const current = middleware[index];
 
       if (!current) {
-        return entry.declaration.handle({ ctx, input: parsedInput, meta });
+        return entry.declaration.handle({ ctx, input: resolvedInput, meta });
       }
 
       return current(
         {
           kind: entry.kind,
           key: entry.key,
-          input: parsedInput,
+          input: resolvedInput,
           ctx,
           meta,
         },
@@ -216,7 +144,68 @@ class Runtime<
 
     const result = await run();
 
-    return this.#parseOutput(entry, result);
+    return unsafe ? result : this.#parseOutput(entry, result);
+  }
+
+  async #publishEvent(
+    entry: EventRegistryEntry,
+    payload: unknown,
+    meta: HandlerInvocationMeta,
+    unsafe: boolean,
+  ): Promise<void> {
+    const resolvedPayload = unsafe ? payload : await this.#parsePayload(entry, payload);
+    const normalizedMeta = { ...meta };
+
+    await this.#eventTransport.publish({
+      key: entry.key,
+      payload: resolvedPayload,
+      meta: normalizedMeta,
+      version: entry.declaration.version,
+    });
+
+    const subscribers = this.#registry.eventSubscribers.get(entry.key) ?? [];
+    for (const subscriber of subscribers) {
+      await this.#runExecutable(subscriber, resolvedPayload, {
+        ...normalizedMeta,
+        source: entry.key,
+        eventKey: entry.key,
+      }, unsafe);
+    }
+  }
+
+  #getExecutableEntry(key: string, kind: ExecutableKind): ExecutableRegistryEntry {
+    const entry = getRegistryEntry(this.#registry, key);
+    if (entry.kind !== kind) {
+      throw new Error(`Handler "${key}" is registered as "${entry.kind}", expected "${kind}"`);
+    }
+
+    return entry;
+  }
+
+  #getEventEntry(key: string): EventRegistryEntry {
+    const entry = getRegistryEntry(this.#registry, key);
+    if (entry.kind !== "event") {
+      throw new Error(`Handler "${key}" is not an event declaration`);
+    }
+
+    return entry;
+  }
+
+  #resolveMiddleware(entry: ExecutableRegistryEntry): Array<CoreMiddleware<TContext>> {
+    const cached = this.#middlewareCache.get(entry);
+    if (cached) {
+      return cached;
+    }
+
+    const entryMiddleware = entry.declaration.middleware ?? [];
+    const resolved = entryMiddleware.length === 0
+      ? this.#middleware
+      : this.#middleware.length === 0
+      ? entryMiddleware
+      : [...this.#middleware, ...entryMiddleware];
+
+    this.#middlewareCache.set(entry, resolved);
+    return resolved;
   }
 
   #buildExecutableBus(kind: ExecutableKind) {

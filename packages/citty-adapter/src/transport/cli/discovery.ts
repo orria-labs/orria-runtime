@@ -32,20 +32,18 @@ export async function discoverCliCommandModules(
   );
 
   const filePaths = await collectCommandFiles(commandsRootDir);
-  const modules: ResolvedCliCommandModule[] = [];
+  return Promise.all(
+    filePaths.map(async (filePath) => {
+      const moduleExports = await importFreshModule<Record<string, unknown>>(filePath);
+      const command = extractCommandFromModule(moduleExports, filePath);
 
-  for (const filePath of filePaths) {
-    const moduleExports = await importFreshModule<Record<string, unknown>>(filePath);
-    const command = extractCommandFromModule(moduleExports, filePath);
-
-    modules.push({
+      return {
       filePath,
       path: resolveCommandPath(commandsRootDir, filePath, command),
       command,
-    });
-  }
-
-  return modules;
+      };
+    }),
+  );
 }
 
 export function normalizeCommandSegment(segment: string): string {

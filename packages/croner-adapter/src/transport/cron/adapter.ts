@@ -59,23 +59,6 @@ export function createCronAdapter<
       let started = false;
       let runtimeJobs: Record<string, CronerRuntimeJob> = {};
       let jobStates = createJobStates(schedules);
-      let watcher = createCronWatcher(options, adapterContext, async () => {
-        const wasStarted = started;
-
-        stopRuntimeJobs();
-        await syncSchedules();
-
-        if (wasStarted) {
-          await startRuntimeJobs();
-        }
-
-        if (options.rootDir) {
-          await generateCronScheduleRegistryArtifacts({
-            rootDir: options.rootDir,
-            schedulesDir: options.schedulesDir,
-          });
-        }
-      });
       let jobs = createJobControllers(
         schedules,
         adapterContext,
@@ -103,6 +86,37 @@ export function createCronAdapter<
           () => jobStates,
         );
       };
+
+      const syncArtifacts = async () => {
+        if (!options.rootDir) {
+          return;
+        }
+
+        await generateCronScheduleRegistryArtifacts({
+          rootDir: options.rootDir,
+          schedulesDir: options.schedulesDir,
+        });
+      };
+
+      const reloadRuntime = async () => {
+        const wasStarted = started;
+
+        stopRuntimeJobs();
+        await syncSchedules();
+
+        if (wasStarted) {
+          await startRuntimeJobs();
+        }
+      };
+
+      let watcher = createCronWatcher(
+        options,
+        adapterContext,
+        async () => {
+          await reloadRuntime();
+          await syncArtifacts();
+        },
+      );
 
       const startRuntimeJobs = async () => {
         const Croner = await loadCroner();
@@ -147,34 +161,20 @@ export function createCronAdapter<
         stop() {
           stopRuntimeJobs();
         },
-        async reload() {
-          const wasStarted = started;
-
-          stopRuntimeJobs();
-          await syncSchedules();
-
-          if (wasStarted) {
-            await startRuntimeJobs();
-          }
+        reload() {
+          return reloadRuntime();
         },
         async watch(watchOptions) {
-          watcher = createCronWatcher(options, adapterContext, async () => {
-            const wasStarted = started;
-
-            stopRuntimeJobs();
-            await syncSchedules();
-
-            if (wasStarted) {
-              await startRuntimeJobs();
-            }
-
-            if (options.rootDir) {
-              await generateCronScheduleRegistryArtifacts({
-                rootDir: options.rootDir,
-                schedulesDir: options.schedulesDir,
-              });
-            }
-          }, watcher, watchOptions);
+          watcher = createCronWatcher(
+            options,
+            adapterContext,
+            async () => {
+              await reloadRuntime();
+              await syncArtifacts();
+            },
+            watcher,
+            watchOptions,
+          );
           await watcher.start();
         },
         unwatch() {
